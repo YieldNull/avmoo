@@ -5,7 +5,7 @@ Copy javmoo.xyz
 """
 import random
 import re
-from time import sleep
+from time import time
 import requests
 from bs4 import BeautifulSoup
 import MySQLdb
@@ -16,6 +16,12 @@ from multiprocessing import Pool, cpu_count, current_process
 host = 'www.javmoo.xyz'
 server = host + '/cn'
 ptn_server = server.replace('.', '\.')
+
+# 数据库
+dbconn = MySQLdb.connect(user='root', passwd='19961020', db='avmoo', charset='utf8', use_unicode=True)
+processes = cpu_count() * 4
+
+total_pages = 183  # 演员总页数
 
 # url
 url_actresses = 'http://%s/actresses/currentPage/{page}' % server
@@ -60,8 +66,6 @@ referer_movie_list_home = 'http://%s/actresses' % server
 referer_movie_list = 'http://%s/star/{sid}/currentPage/{page}' % server
 referer_movie = 'http://%s/star/{sid}' % server
 
-delay = 0.5
-
 # User-Agent Pool
 user_agents = []
 with open('agents.txt') as f:
@@ -74,40 +78,58 @@ with open('proxies.txt') as f:
         l = line.split()
         http_proxies.append('%s:%s' % (l[0], l[1]))
 
-# 数据库
-dbconn = MySQLdb.connect(user='root', passwd='19961020', db='avmoo', charset='utf8', use_unicode=True)
+http_proxies = list(set(http_proxies))
+http_proxies.append('localhost')  # 随机到localhost就不使用代理
 
 
-def do_get(url, hds=headers, retry=0):
+def log(msg):
+    name = current_process().name
+    print '[%s] %s' % (name, msg)
+
+
+def do_get(url, hds=headers, use_proxy=True):
     """
     获取源码
-    :param url:
-    :param hds:
-    :param retry:
-    :return:
+    :param url: URL
+    :param hds: HTTP 请求头
+    :param use_proxy: 是否使用代理
+    :return: 源码
     """
     agent = random.choice(user_agents)
     hds = hds.copy()
     hds['User-Agent'] = agent
 
-    try:
-        if retry == 0:
-            res = requests.get(url, headers=hds, timeout=3)
-        elif retry <= 2:
-            res = requests.get(url, headers=headers, timeout=3, proxies={'http': 'lotusland.club:3128'})
+    retry = 0
+    while True:
+        try:
+            if not use_proxy:  # 不用代理
+                res = requests.get(url, headers=hds)
+            else:
+                # 随机选取代理
+                proxy = random.choice(http_proxies)
+                proxies = {'http': proxy}
+                if proxy == 'localhost':
+                    res = requests.get(url, headers=hds)
+                else:
+                    res = requests.get(url, headers=hds, proxies=proxies)
+        except (requests.exceptions.Timeout, requests.exceptions.HTTPError,
+                requests.exceptions.ConnectionError, requests.exceptions.RequestException):
+            log('[HTTP: Exception]')
+            continue
+
+        # 判断返回码
+        code = res.status_code
+        if code != 200:
+            log('[HTTP: %d] retrying......' % code)
+            if not use_proxy:  # 重试时用代理
+                use_proxy = True
+
+            # 重试五十则跳出循环，返回
+            retry += 1
+            if retry > 50:
+                return ''
         else:
-            proxy = random.choice(http_proxies)
-            proxies = {'http': proxy}
-            res = requests.get(url, headers=hds, timeout=3, proxies=proxies)
-    except requests.exceptions.Timeout:
-        return do_get(url, headers, retry + 1)
-
-    code = res.status_code
-
-    if code != 200:
-        print '[%d] agent:%d retrying......' % (code, user_agents.index(agent))
-        return do_get(url, headers, retry + 1)
-    return res.text, code
+            return res.text  # 跳出循环，返回源码
 
 
 def get_star_list(page=1):
@@ -117,8 +139,8 @@ def get_star_list(page=1):
     :return: [{'sid':演员id,'name':演员姓名,'img':演员头像URL}],下一页的页码
             下一页页码为None则表示遍历结束
     """
-    res, code = do_get(url_actresses.format(page=page))
-    print '[%d] page:%d' % (code, page)
+    res = do_get(url_actresses.format(page=page))
+    log('[HTTP: 200] got stars at page:%d' % page)
 
     result = []
     soup = BeautifulSoup(res)
@@ -159,8 +181,8 @@ def get_movie_list(sid, page=1):
         hd['Referer'] = referer_movie_list.format(sid=sid, page=int(page) - 1)
         url = url_movie_list.format(sid=sid, page=page)
 
-    res, code = do_get(url, hd)
-    print '[%d] sid:%s page:%s' % (code, sid, page)
+    res = do_get(url, hd)
+    log('[HTTP: 200] got movies of sid:%s at page:%s' % (sid, page))
 
     result = []
     soup = BeautifulSoup(res)
@@ -192,9 +214,8 @@ def get_movie(mid):
     :return: {'mid':影片id,'id': 番号, 'name': 名称, 'time': 发行时间, 'length': 时长（分钟）,
             'cover': 封面大图URL, 'cates': 分类列表, 'actors': 演员列表, 'samples': 样图列表}
     """
-    sleep(delay)
-    res, code = do_get(url_movie.format(mid=mid))
-    print '[%d] mid:%s' % (code, mid)
+    res = do_get(url_movie.format(mid=mid), use_proxy=False)
+    log('[HTTP: 200] got movie mid:%s' % mid)
 
     name = re.search(ptn_movie_name, res)
     name = name.group(1).strip() if name else ''
@@ -223,88 +244,63 @@ def fetch_star(page):
     """
     获取指定页面的演员列表
     :param page:
-    :return:
+    :return: 演员列表
     """
-    try:
-        stars, p = get_star_list(page)
-    except requests.exceptions.ConnectionError:
-        print 'ConnectionError: fetch_star page:%d' % page
-        return fetch_star(page)
-    else:
-        leng = len(stars)
-        if leng == 0:
-            return fetch_star(page)
-        print page, len(stars)
-        return stars
+    stars, p = get_star_list(page)
+    return stars
 
 
 def fetch_movie_id(sid):
     """
     获取指定演员的影片列表
-    :param sid:
-    :return:
+    :param sid: 演员id
+    :return: 影片列表
     """
     movie_list = []
     page = 1
     while page is not None:
-        try:
-            movies, page = get_movie_list(sid, page)
-        except requests.exceptions.ConnectionError:
-            print 'ConnectionError: fetch_movie_id sid:%s' % sid
-            continue
+        movies, page = get_movie_list(sid, page)
         movie_list += movies
-        leng = len(movies)
-        if leng == 0:
-            page -= 1
-            continue
-        print sid, len(movies)
     return movie_list
 
 
-def fetch_movie_detail(mid):
+def down_star():
     """
-    获取电影详情
-    :param: mid
+    在线获取演员列表，存入数据库
     :return:
     """
-    try:
-        movie = get_movie(mid)
-    except requests.exceptions.ConnectionError:
-        print 'ConnectionError: mid:%s' % mid
-        return fetch_movie_detail(mid)
-    else:
-        print mid
-        return movie
-
-
-processes = cpu_count() * 4
-
-
-def down_star():
     pool = Pool(processes=processes)
-    for page in range(1, 183):
+    for page in range(1, total_pages + 1):
         pool.apply_async(fetch_star, args=(page,), callback=store_stars)
     pool.close()
     pool.join()
-    print 'successfully down star'
+    log('Successfully down star')
 
 
 def down_movie_id():
+    """
+    读取数据库中的演员id,在线获取演员作品，存入数据库
+    :return:
+    """
     pool = Pool(processes=processes)
     for sid in read_star():
         pool.apply_async(fetch_movie_id, args=(sid,), callback=store_movie_id)
     pool.close()
     pool.join()
-    print 'successfully down movie id'
+    log('Successfully down movie id')
 
 
 def down_movie_detail():
+    """
+    读取数据库中的电影id，在线获取详情，存入数据库
+    :return:
+    """
     pool = Pool(processes=processes)
     for mid in read_movie_id():
-        pool.apply_async(fetch_movie_detail, args=(mid,), callback=store_movie_detail)
+        pool.apply_async(get_movie, args=(mid,), callback=store_movie_detail)
     pool.close()
     pool.join()
-    print 'successfully down movie detail'
+    log('Successfully down movie detail')
 
 
 def create_db():
@@ -375,7 +371,7 @@ def insert(sql, data):
     try:
         cursor.execute(sql, data)
     except _mysql_exceptions.IntegrityError:
-        print 'duplicated'
+        log('[MySQL: IntegrityError]')
     finally:
         dbconn.commit()
         cursor.close()
@@ -458,7 +454,7 @@ def store_stars(stars):
 
 def store_movie_id(movies):
     """
-    存一批电影
+    存一批电影id
     :param movies:
     :return:
     """
@@ -466,6 +462,11 @@ def store_movie_id(movies):
 
 
 def store_movie_detail(movie):
+    """
+    存电影详情
+    :param movie: 电影信息
+    :return:
+    """
     insert_movie_detail(movie)
 
     mid = movie['mid']
@@ -478,6 +479,10 @@ def store_movie_detail(movie):
 
 
 def read_star():
+    """
+    读取所有演员信息
+    :return:
+    """
     cursor = dbconn.cursor()
     cursor.execute('SELECT sid FROM star')
 
@@ -489,6 +494,10 @@ def read_star():
 
 
 def read_movie_id():
+    """
+    读取所有电影id
+    :return:
+    """
     cursor = dbconn.cursor()
     cursor.execute('SELECT mid FROM movie')
     movies = []
@@ -498,23 +507,38 @@ def read_movie_id():
     return movies
 
 
-def serial():
-    for sid in read_star():
-        ml = fetch_movie_id(sid)
-        store_movie_id(ml)
+def text_proxies():
+    """
+    测试代理相应速度
+    :return:
+    """
+    threshold = 3.0  # 想要速度阈值
+    errors = []
+    for proxy in http_proxies:
+        print 'test %s' % proxy
+        try:
+            start = time()
+            res = requests.get('http://%s' % server, proxies={'http': proxy})
+            end = time()
+        except requests.exceptions.ConnectionError:
+            print 'proxy:%s ConnectionError' % proxy
+            errors.append(proxy)
+        except requests.exceptions.ReadTimeout:
+            print 'proxy:%s ConnectTimeout' % proxy
+            errors.append(proxy)
+        else:
+            timeout = end - start
+            print 'proxy:%s time:%f' % (proxy, timeout), len(res.text)
+            if timeout > threshold:
+                errors.append(proxy)
 
-
-def test():
-    for sid in read_star():
-        page = 1
-        while page:
-            movie_list, page = get_movie_list(sid, page)
-            # for movie in movie_list:
-            #     get_movie(movie['mid'])
+    map(http_proxies.remove, errors)
+    for proxy in http_proxies:
+        print proxy
 
 
 if __name__ == '__main__':
-    create_db()
-    down_star()
-    down_movie_id()
+    # create_db()
+    # down_star()
+    # down_movie_id()
     down_movie_detail()
