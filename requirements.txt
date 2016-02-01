@@ -1,0 +1,4 @@
+MySQL-python
+requests
+beautifulsoup4
+timeout_decorator
