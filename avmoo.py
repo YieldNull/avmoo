@@ -1,7 +1,7 @@
 # coding:utf-8
 
 """
-Copy www.javmoo.xyz, www.avless.com, www.avmemo.com
+A spider for porn sites: www.javmoo.xyz, www.avless.com, www.avmemo.com
 """
 
 import re
@@ -9,7 +9,6 @@ import random
 import requests
 import MySQLdb
 import _mysql_exceptions
-import timeout_decorator
 from time import time
 from bs4 import BeautifulSoup
 from multiprocessing import Pool, cpu_count, current_process
@@ -54,11 +53,6 @@ def _log(msg):
     print '[%s] %s' % (name, msg)
 
 
-@timeout_decorator.timeout(3, use_signals=False)
-def _get(*args, **kwargs):
-    return requests.get(args, kwargs)
-
-
 def _do_get(url, hds=headers, use_proxy=True):
     """
     获取源码
@@ -80,9 +74,9 @@ def _do_get(url, hds=headers, use_proxy=True):
             proxies = {'http': proxy}
 
             if (proxy == 'localhost') or (not use_proxy):
-                res = _get(url, headers=hds)
+                res = requests.get(url, headers=hds)
             else:
-                res = _get(url, headers=hds, proxies=proxies)
+                res = requests.get(url, headers=hds, proxies=proxies)
         except requests.exceptions.Timeout:
             _log('[HTTP: Timeout]')
         except (requests.exceptions.HTTPError,
@@ -107,7 +101,7 @@ def _do_get(url, hds=headers, use_proxy=True):
 
 
 class Spider(object):
-    def __init__(self, domain, actor_pages):
+    def __init__(self, domain):
         # 网站信息
         self.domain = domain
         self.server = domain + '/cn'
@@ -115,7 +109,7 @@ class Spider(object):
         self.headers = headers.copy()
         self.headers['Host'] = domain
 
-    def _get_star_list(self, page=1):
+    def get_star_list(self, page=1):
         """
         分页获取演员列表
         :param page:页码
@@ -153,7 +147,7 @@ class Spider(object):
         else:
             return result, None
 
-    def _get_movie_list(self, sid, page=1):
+    def get_movie_list(self, sid, page=1):
         """
         分页获取指定演员的所有作品
         :param sid: 演员id
@@ -206,7 +200,7 @@ class Spider(object):
         else:
             return result, None
 
-    def _get_movie(self, mid):
+    def get_movie(self, mid):
         """
         获取指定影片的信息
         :param mid: 影片id
@@ -224,8 +218,8 @@ class Spider(object):
         ptn_movie_length = u'<p><span class="header">长度:</span> (\d+)分钟</p>'
         ptn_movie_cover = u'<a class="bigImage" href=".*?"><img src="(.*?)".*?></a>'
         ptn_movie_cate = u'<a href="http://%s/genre/.*?">(.*?)</a>' % self.ptn_server
-        ptn_movie_actor = u'<a class="avatar-box" href="http://%s/star/(.*?)">' % self.ptn_server
-        ptn_movie_sample = u'<a class="sample-box" href="(.*?)">'
+        ptn_movie_actor = u'<a class="avatar-box.*?" href="http://%s/star/(.*?)">' % self.ptn_server
+        ptn_movie_sample = u'<a class="sample-box.*?" href="(.*?)">'
 
         res = _do_get(url_movie.format(mid=mid), use_proxy=False)
         _log('[HTTP: 200] got movie mid:%s' % mid)
@@ -233,8 +227,8 @@ class Spider(object):
         name = re.search(ptn_movie_name, res)
         name = name.group(1).strip() if name else ''
 
-        id_ = re.search(ptn_movie_vid, res)
-        id_ = id_.group(1) if id_ else ''
+        _id = re.search(ptn_movie_vid, res)
+        _id = _id.group(1) if _id else ''
 
         time = re.search(ptn_movie_time, res)
         time = time.group(1).strip() if time else ''
@@ -249,7 +243,7 @@ class Spider(object):
         actors = re.findall(ptn_movie_actor, res)
         samples = re.findall(ptn_movie_sample, res)
 
-        return {'mid': mid, 'id': id_, 'name': name, 'time': time, 'length': length,
+        return {'mid': mid, 'id': _id, 'name': name, 'time': time, 'length': length,
                 'cover': cover, 'cates': cates, 'actors': actors, 'samples': samples}
 
     def fetch_star(self, page):
@@ -258,7 +252,7 @@ class Spider(object):
         :param page:
         :return: 演员列表
         """
-        stars, p = self._get_star_list(page)
+        stars, p = self.get_star_list(page)
         return stars
 
     def fetch_movie_id(self, sid):
@@ -270,9 +264,46 @@ class Spider(object):
         movie_list = []
         page = 1
         while page is not None:
-            movies, page = self._get_movie_list(sid, page)
+            movies, page = self.get_movie_list(sid, page)
             movie_list += movies
         return movie_list
+
+
+class Movie(object):
+    def __init__(self, mid, _id=None, name=None, time=None,
+                 length=None, cover=None, small=None):
+        self.mid = mid
+        self._id = _id
+        self.name = name
+        self.time = time
+        self.length = length
+        self.cover = cover
+        self.small = small
+
+
+class Star(object):
+    def __init__(self, sid, name=None, img=None):
+        self.sid = sid
+        self.name = name
+        self.img = img
+
+
+class MovieActor(object):
+    def __init__(self, mid, sid):
+        self.mid = mid
+        self.sid = sid
+
+
+class MovieSample(object):
+    def __init__(self, mid, img):
+        self.mid = mid
+        self.img = img
+
+
+class MovieCate(object):
+    def __init__(self, mid, cate):
+        self.mid = mid
+        self.cate = cate
 
 
 class DBManager(object):
@@ -509,7 +540,7 @@ def down_movie_detail(spider, dbmanager):
     """
     pool = Pool(processes=processes)
     for mid in dbmanager.read_movie_id():
-        pool.apply_async(spider._get_movie, args=(mid,), callback=dbmanager.store_movie_detail)
+        pool.apply_async(spider.get_movie, args=(mid,), callback=dbmanager.store_movie_detail)
     pool.close()
     pool.join()
     _log('Successfully down movie detail')
@@ -525,7 +556,7 @@ def test_proxies(url):
         print 'test %s' % proxy
         try:
             start = time()
-            res = _get(url, proxies={'http': proxy})
+            res = requests.get(url, proxies={'http': proxy})
             end = time()
         except requests.exceptions.ConnectionError:
             print 'proxy:%s ConnectionError' % proxy
@@ -543,7 +574,10 @@ def test_proxies(url):
 
 
 if __name__ == '__main__':
-    # create_db()
-    # down_star()
-    # down_movie_id()
-    down_movie_detail()
+    db = DBManager(user='root', passwd='19961020', db='avmoo')
+    # db.create_db()
+
+    spider = Spider(domain='www.javmoo.xyz')
+    # down_star(spider, db, 182)
+    # down_movie_id(spider, db)
+    # down_movie_detail(spider, db)
