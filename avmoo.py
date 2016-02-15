@@ -1,7 +1,7 @@
 # coding:utf-8
 
 """
-A spider for porn sites: www.javmoo.xyz, www.avless.com, www.avmemo.com
+A spider for porn sites: www.avmoo.net, www.avless.net, www.avmemo.net
 """
 
 import re
@@ -269,43 +269,6 @@ class Spider(object):
         return movie_list
 
 
-class Movie(object):
-    def __init__(self, mid, _id=None, name=None, time=None,
-                 length=None, cover=None, small=None):
-        self.mid = mid
-        self._id = _id
-        self.name = name
-        self.time = time
-        self.length = length
-        self.cover = cover
-        self.small = small
-
-
-class Star(object):
-    def __init__(self, sid, name=None, img=None):
-        self.sid = sid
-        self.name = name
-        self.img = img
-
-
-class MovieActor(object):
-    def __init__(self, mid, sid):
-        self.mid = mid
-        self.sid = sid
-
-
-class MovieSample(object):
-    def __init__(self, mid, img):
-        self.mid = mid
-        self.img = img
-
-
-class MovieCate(object):
-    def __init__(self, mid, cate):
-        self.mid = mid
-        self.cate = cate
-
-
 class DBManager(object):
     def __init__(self, user, passwd, db):
         # 数据库
@@ -504,7 +467,7 @@ class DBManager(object):
         return movies
 
 
-processes = cpu_count()
+processes = cpu_count() * 4
 
 
 def down_star(spider, dbmanager, actor_pages):
@@ -574,10 +537,11 @@ def test_proxies(url):
 
 
 if __name__ == '__main__':
-    db = DBManager(user='root', passwd='19961020', db='avmoo')
+    # db = DBManager(user='root', passwd='19961020', db='avmoo')
     # db.create_db()
 
-    spider = Spider(domain='www.javmoo.xyz')
+    # spider = Spider(domain='www.avmoo.net')
     # down_star(spider, db, 182)
     # down_movie_id(spider, db)
     # down_movie_detail(spider, db)
+    pass

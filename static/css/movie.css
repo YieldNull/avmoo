@@ -1,0 +1,165 @@
+.movie
+{
+	margin: 0px;
+	padding: 15px 0px;
+	overflow: hidden;
+	background-color: #fff;
+	box-shadow: 0 1px 3px rgba(0,0,0,.3);
+	-moz-box-shadow: 0 1px 3px rgba(0,0,0,.3);
+	-webkit-box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+
+.screencap
+{
+	text-align: center;
+}
+
+@media screen and (min-width: 992px) {
+	.screencap
+	{
+		border-right: 1px solid #E1E1E1;
+	}
+}
+
+@media screen and (max-width: 992px) {
+	.info {
+		padding-top:15px;
+	}
+}
+
+@media screen and (max-width: 480px) {
+	.screencap {	
+		padding:0px;
+	}
+	
+	.movie {
+		padding:0px;
+	}
+}
+
+.screencap img
+{
+	width:100%
+}
+
+.info a {
+	color:#333;
+	line-height:1;
+}
+
+.info p {
+	word-break:break-all;
+	font-size:14px;
+}
+
+.info .genre
+{
+	margin-right: 15px;
+}
+
+.info .header
+{
+	font-weight:bold;
+	font-size:14px;
+}
+
+.avatar-box .photo-frame
+{
+	overflow:hidden;
+	height:120px;
+    margin:10px;
+}
+
+.sample-box .photo-frame
+{
+	overflow:hidden;
+    margin:10px;
+}
+
+.avatar-box
+{
+    display:inline-block;
+    background-color: #fff;
+	overflow:hidden;
+    margin: 5px;
+    width: 140px;
+    padding:0px;
+    border:none;
+    border-radius:0px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    -moz-box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    -webkit-box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+
+.avatar-box img
+{
+    height: 120px;
+}
+
+.avatar-box span
+{
+	font-weight:bold;
+	text-align: center;
+    word-wrap: break-word;
+    display: block;
+    padding: 10px;
+    line-height: 22px;
+    color: #333;
+    background-color: #FAFAFA;
+    border-top: 1px solid #F2F2F2;
+}
+
+.sample-box
+{
+    display:inline-block;
+    background-color: #fff;
+	overflow:hidden;
+    margin: 5px;
+    width: 140px;
+    padding:0px;
+    border:none;
+    border-radius:0px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    -moz-box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    -webkit-box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+
+.sample-box img
+{
+    height: 90px;
+}
+
+@media screen and (max-width: 767px) {
+
+	#avatar-waterfall,
+	#sample-waterfall
+	{
+		text-align: center;
+	}
+
+	.avatar-box .photo-frame,
+	.sample-box .photo-frame
+	{
+	    margin:0px;
+	}
+
+	.avatar-box
+	{
+		width: 120px;
+	}
+
+    .avatar-box img
+    {
+        height: 120px;
+    }
+
+	.sample-box
+	{
+		width: 120px;
+	}
+
+    .sample-box img
+    {
+        height: 90px;
+    }
+}

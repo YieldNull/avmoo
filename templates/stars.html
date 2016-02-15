@@ -6,18 +6,15 @@
 
 {% block body %}
     <div class="row">
-        <div id="waterfall">
-            {% for movie in movies %}
-                <div class="item">
-                    <a class="movie-box" href="/movie/{{ movie.mid }}">
+        <div id="waterfall" style="position: relative; height: 2070px; width: 1122px;" class="masonry">
+            {% for star in stars %}
+                <div class="item masonry-brick" style="position: absolute; top: 0px; left: 0px;">
+                    <a class="avatar-box text-center" href="/star/{{ star.sid }}">
                         <div class="photo-frame">
-                            <img src="{{ movie.small }}"
-                                 title="{{ movie.name.replace(movie.id,'') }}">
+                            <img src="{{ star.img }}" title="{{ star.name }}">
                         </div>
                         <div class="photo-info">
-                        <span>{{ movie.name.replace(movie.id,'') }} <br><date>{{ movie.id }}</date> / <date>
-                            {{ movie.time }}
-                        </date></span>
+                            <span>{{ star.name }}</span>
                         </div>
                     </a>
                 </div>

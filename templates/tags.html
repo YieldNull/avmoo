@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+
+{% block css %}
+    <link href='{{ url_for('static',filename='css/tag.css') }}' rel='stylesheet' type='text/css'>
+{% endblock %}
+
+{% block body %}
+    <div class="row genre-box">
+        {% for tag in tags %}
+            <a class="col-lg-2 col-md-2 col-sm-3 col-xs-6 text-center" href="/tag/{{ tag.cate }}/">{{ tag.cate }}</a>
+        {% endfor %}
+    </div>
+{% endblock %}

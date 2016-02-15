@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+
+{% block css %}
+    <link href='{{ url_for('static',filename='css/movie.css') }}' rel='stylesheet' type='text/css'>
+{% endblock %}
+
+{% block body %}
+    <h3>{{ movie.name }}</h3>
+    <div class="row movie">
+        <div class="col-md-9 screencap">
+            <img src="{{ movie.cover }}" title="{{ movie.name }}">
+        </div>
+        <div class="col-md-3 info">
+            <p><span class="header">识别码:</span> <span style="color:#CC0000;">{{ movie.id }}</span></p>
+            <p><span class="header">发行时间:</span> {{ movie.time }}</p>
+            <p><span class="header">长度:</span> {{ movie.length }}分钟</p>
+            <p class="header">类别:</p>
+            <p>
+                {% for cate in cates %}
+                    <span class="genre"><a href="/tag/{{ cate.cate }}/">{{ cate.cate }}</a></span>
+                {% endfor %}
+            </p>
+        </div>
+    </div>
+
+    <h4>演员</h4>
+    <div id="avatar-waterfall">
+        {% for actor in actors %}
+            <a class="avatar-box" href="/star/{{ actor.sid }}">
+                <div class="photo-frame">
+                    <img src="{{ actor.img }}" title="{{ actor.name }}">
+                </div>
+                <span>{{ actor.name }}</span>
+            </a>
+        {% endfor %}
+    </div>
+
+    <div class="clearfix"></div>
+    {% if samples.count()>0 %}
+        <h4>样品图像</h4>
+        <div id="sample-waterfall">
+            {% for sample in samples %}
+                <a class="sample-box" href="{{ sample.img }}">
+                    <div class="photo-frame">
+                        <img src="{{ sample.img }}"
+                             title="{{ movie.name }} - 样品图像 - {{ loop.index }}">
+                    </div>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <script>
+        (function ($) {
+            $('.bigImage').magnificPopup({
+                type: 'image',
+                closeOnContentClick: true,
+                closeBtnInside: false,
+                fixedContentPos: true,
+                mainClass: 'mfp-no-margins mfp-with-zoom',
+                image: {
+                    verticalFit: true,
+                    titleSrc: function (item) {
+                        return '{{ movie.name }}';
+                    }
+                },
+                zoom: {
+                    enabled: true,
+                    duration: 300
+                }
+            });
+
+            $('#sample-waterfall').magnificPopup({
+                delegate: 'a',
+                type: 'image',
+                closeOnContentClick: false,
+                closeBtnInside: false,
+                mainClass: 'mfp-with-zoom mfp-img-mobile',
+                image: {
+                    verticalFit: true,
+                    titleSrc: function (item) {
+                        return '{{ movie.name }}';
+                    }
+                },
+                gallery: {
+                    enabled: true
+                },
+                zoom: {
+                    enabled: true,
+                    duration: 300,
+                    opener: function (element) {
+                        return element.find('img');
+                    }
+                }
+
+            });
+        })(jQuery);
+    </script>
+{% endblock %}
