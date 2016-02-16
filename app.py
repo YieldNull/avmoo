@@ -1,8 +1,13 @@
 # coding:utf-8
+
+"""
+A Flask APP
+"""
+
 import datetime
 from flask import Flask, render_template
 from peewee import CharField, ForeignKeyField, CompositeKey, fn
-from playhouse.flask_utils import FlaskDB, object_list
+from playhouse.flask_utils import FlaskDB, object_list, get_object_or_404
 
 DATABASE = {
     'name': 'avmoo',
@@ -20,7 +25,7 @@ app.config.from_object(__name__)
 app.debug = True
 
 database = FlaskDB(app)
-paginate_by = 50
+paginate_by = 36
 
 
 @app.route('/')
@@ -39,7 +44,7 @@ def released():
 
 @app.route('/movie/<mid>')
 def movie(mid):
-    movie = Movie.get(Movie.mid == mid)
+    movie = get_object_or_404(Movie, Movie.mid == mid)
     actors = Star.select().join(MovieActor).where(MovieActor.mid == mid)
     samples = MovieSample.select().join(Movie).where(Movie.mid == mid)
     cates = MovieCate.select().join(Movie).where(Movie.mid == mid)

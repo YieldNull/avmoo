@@ -307,27 +307,27 @@ class DBManager(object):
         """)
         cursor.execute("""
             CREATE TABLE movie_actor(
-                mid     VARCHAR(127),
-                sid     VARCHAR(127),
-                PRIMARY KEY (mid,sid),
-                FOREIGN KEY (mid) REFERENCES movie(mid),
-                FOREIGN KEY (sid) REFERENCES star(sid)
+                mid_id     VARCHAR(127),
+                sid_id     VARCHAR(127),
+                PRIMARY KEY (mid_id,sid_id),
+                FOREIGN KEY (mid_id) REFERENCES movie(mid),
+                FOREIGN KEY (sid_id) REFERENCES star(sid)
             )
         """)
         cursor.execute("""
             CREATE TABLE movie_sample(
-                mid     VARCHAR(127),
-                img     VARCHAR(127),
-                PRIMARY KEY (mid,img),
-                FOREIGN KEY (mid) REFERENCES movie(mid)
+                mid_id     VARCHAR(127),
+                img        VARCHAR(127),
+                PRIMARY KEY (mid_id,img),
+                FOREIGN KEY (mid_id) REFERENCES movie(mid)
             )
         """)
         cursor.execute("""
             CREATE TABLE movie_cate(
-                mid     VARCHAR(127),
+                mid_id     VARCHAR(127),
                 cate    VARCHAR(127),
-                PRIMARY KEY (mid,cate),
-                FOREIGN KEY (mid) REFERENCES movie(mid)
+                PRIMARY KEY (mid_id,cate),
+                FOREIGN KEY (mid_id) REFERENCES movie(mid)
             )
         """)
 
@@ -384,7 +384,7 @@ class DBManager(object):
         :param sid: 演员id
         :return:
         """
-        sql = 'INSERT INTO movie_actor(mid,sid) VALUES(%s,%s)'
+        sql = 'INSERT INTO movie_actor(mid_id,sid_id) VALUES(%s,%s)'
         self.insert(sql, (mid, sid))
 
     def insert_movie_sample(self, mid, img):
@@ -394,7 +394,7 @@ class DBManager(object):
         :param img: 图片url
         :return:
         """
-        sql = 'INSERT INTO movie_sample(mid,img) VALUES(%s,%s)'
+        sql = 'INSERT INTO movie_sample(mid_id,img) VALUES(%s,%s)'
         self.insert(sql, (mid, img))
 
     def insert_movie_cate(self, mid, cate):
@@ -404,7 +404,7 @@ class DBManager(object):
         :param cate: 电影分类
         :return:
         """
-        sql = 'INSERT INTO movie_cate(mid,cate) VALUES(%s,%s)'
+        sql = 'INSERT INTO movie_cate(mid_id,cate) VALUES(%s,%s)'
         self.insert(sql, (mid, cate))
 
     def store_stars(self, stars):
