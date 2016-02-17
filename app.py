@@ -5,7 +5,9 @@ A Flask APP
 """
 
 import datetime
-from flask import Flask, render_template
+
+import re
+from flask import Flask, render_template, request, redirect, url_for, abort
 from peewee import CharField, ForeignKeyField, CompositeKey, fn
 from playhouse.flask_utils import FlaskDB, object_list, get_object_or_404
 
@@ -34,7 +36,7 @@ def index():
     return object_list('index.html', query=query, context_variable='movies', paginate_by=paginate_by)
 
 
-@app.route('/released/')
+@app.route('/released')
 def released():
     now = datetime.datetime.now()
     time = now.strftime("%Y-%m-%d %H:%M")
@@ -51,30 +53,42 @@ def movie(mid):
     return render_template('movie.html', movie=movie, actors=actors, samples=samples, cates=cates)
 
 
-@app.route('/star/')
+@app.route('/star')
 def stars():
     query = Star.select(Star, fn.COUNT(MovieActor.mid)) \
         .join(MovieActor).group_by(Star.sid).order_by(fn.COUNT(MovieActor.mid).desc())
     return object_list('stars.html', query=query, context_variable='stars', paginate_by=paginate_by)
 
 
-@app.route('/tag/')
+@app.route('/tag')
 def tags():
     tags = MovieCate.select(MovieCate.cate, fn.COUNT(MovieCate.mid)) \
         .group_by(MovieCate.cate).distinct().order_by(MovieCate.cate.desc())
     return render_template('tags.html', tags=tags)
 
 
-@app.route('/star/<sid>/')
+@app.route('/star/<sid>')
 def star_movie(sid):
     query = Movie.select().join(MovieActor).join(Star).where(Star.sid == sid).order_by(Movie.time.desc())
     return object_list('index.html', query=query, context_variable='movies', paginate_by=paginate_by)
 
 
-@app.route('/tag/<tag>/')
+@app.route('/tag/<tag>')
 def tag_movie(tag):
     query = Movie.select().join(MovieCate).where(MovieCate.cate == tag).order_by(Movie.time.desc())
     return object_list('index.html', query=query, context_variable='movies', paginate_by=paginate_by)
+
+
+@app.route('/search')
+def search():
+    word = request.args.get('q').strip()
+    match = re.search('([a-zA-Z]+)\s*-?\s*(\d+)', word)
+    if not match:
+        return abort(404)
+
+    word = ('%s-%s' % (match.group(1), match.group(2))).upper()
+    movie = get_object_or_404(Movie, Movie.id % word)
+    return redirect(url_for('movie', mid=movie.mid))
 
 
 class Movie(database.Model):

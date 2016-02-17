@@ -39,13 +39,13 @@
     <div class="bottom">
         <ul class="pager">
             <li class="previous {{ 'disabled' if current_page==1 or '' }}">
-                <a href="{{ './?page=%d'%(current_page - 1) if current_page>1 else 'javascript:void(0)' }}">
+                <a href="{{ '?page=%d'%(current_page - 1) if current_page>1 else 'javascript:void(0)' }}">
                     « Previous {{ '%d / %d'%(current_page - 1,page_count) if current_page>1 else '' }}
                 </a>
             </li>
 
             <li style="margin-left: 20px" class="next {{ 'disabled' if current_page==page_count or '' }}">
-                <a href="{{ './?page=%d'%(current_page + 1) if current_page< page_count else 'javascript:void(0)' }}">
+                <a href="{{ '?page=%d'%(current_page + 1) if current_page< page_count else 'javascript:void(0)' }}">
                     Next {{ '%d / %d'%(current_page + 1,page_count) if current_page< page_count else '' }} »
                 </a>
             </li>
