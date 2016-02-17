@@ -87,7 +87,7 @@ def search():
         return abort(404)
 
     word = ('%s-%s' % (match.group(1), match.group(2))).upper()
-    movie = get_object_or_404(Movie, Movie.id % word)
+    movie = get_object_or_404(Movie, Movie.id == word)
     return redirect(url_for('movie', mid=movie.mid))
 
 
