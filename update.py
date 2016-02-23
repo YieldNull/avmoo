@@ -1,84 +1,64 @@
 # coding:utf-8
-import re
-import requests
-import signal
-from bs4 import BeautifulSoup
-from time import time
 
-proxies = []
+"""
+Update latest released movie.
 
+Run update.py at 4am everyday using cron.
 
-def get_proxies():
-    global proxies
+0 4 * * * /path_to_it/update.py > update_log.txt
+"""
 
-    urls = ['http://pachong.org/transparent.html',
-            'http://pachong.org/high.html',
-            'http://pachong.org/anonymous.html'
-            ]
-    for url in urls:
-        res = requests.get(url).text
-
-        # var duck=1159+2359
-        m = re.search('var ([a-zA-Z]+)=(.*?);', res)
-        var = {m.group(1): eval(m.group(2))}
-
-        # var bee=6474+1151^duck;
-        exprs = re.findall('var ([a-zA-Z]+)=(\d+)\+(\d+)\^([a-zA-Z]+);', res)
-
-        for expr in exprs:
-            var[expr[0]] = int(expr[1]) + int(expr[2]) ^ var[expr[3]]
-
-        soup = BeautifulSoup(res)
-        table = soup.find('table', class_='tb')
-
-        for tr in table.find_all('tr'):
-            data = tr.find_all('td')
-            ip = data[1].text
-
-            if not re.match('\d+\.\d+\.\d+\.\d+', ip):
-                continue
-
-            # (15824^seal)+1327
-            script = data[2].script.text
-            expr = re.search('\((\d+)\^([a-zA-Z]+)\)\+(\d+)', script)
-
-            port = (int(expr.group(1)) ^ var[expr.group(2)]) + int(expr.group(3))
-            proxies.append('%s:%s' % (ip, port))
-    proxies = list(set(proxies))
+from avmoo import Spider, DBManager, Proxy
 
 
-def test_proxies(url, timeout):
-    def handler(signum, frame):
-        raise requests.exceptions.Timeout()
+def mid2int(mid):
+    """
+    将mid转换为36进制，1-9a-z
+    :param mid:
+    :return:
+    """
+    value = 0
+    mid = mid.lower()
+    length = len(mid)
 
-    errors = []
-    for proxy in proxies:
-        print 'test %s' % proxy
-        try:
-            signal.signal(signal.SIGALRM, handler)
-            signal.alarm(timeout)
-            start = time()
-            res = requests.get(url, proxies={'http': proxy})
-            end = time()
-        except requests.exceptions.ConnectionError:
-            print 'proxy:%s ConnectionError' % proxy
-            errors.append(proxy)
-        except requests.exceptions.Timeout:
-            print 'proxy:%s ConnectTimeout' % proxy
-            errors.append(proxy)
-        else:
-            if res.status_code != 200:
-                print '[%d HTTP ERROR]' % res.status_code
-            else:
-                escape = end - start
-                print 'proxy:%s time:%f' % (proxy, escape), len(res.text)
-        finally:
-            signal.alarm(0)
-    map(proxies.remove, errors)
-    for proxy in proxies:
-        print proxy
-    print len(proxies), len(errors)
+    for i in range(len(mid)):
+        c = mid[i]
+        factor = int(c) if c.isdigit() else ord(c) - 97 + 10
+        value += 36 ** (length - i - 1) * factor
+    return value
 
 
-get_proxies()
-test_proxies('http://www.avmoo.net/cn', 2)
+def int2mid(value):
+    if value < 36:
+        return str(value) if value < 10 else chr(value - 10 + 97)
+    else:
+        c = value % 36
+        sub = (value - c) / 36
+        c = str(c) if c < 10 else chr(c - 10 + 97)
+        return '%s%s' % (int2mid(sub), c)
+
+
+def fetch_missing(mid_max=None):
+    proxies = Proxy.get_proxies_from_cn_proxy()
+    Proxy.test_proxies(proxies, 'http://www.avmoo.net/cn/movie/5dlm', 2)
+
+    spider = Spider('www.avmoo.net', proxies)
+    db = DBManager('root', '19961020', 'avmoo')
+
+    if mid_max is None:
+        mid_max = spider.get_latest(1)[0]['mid']
+
+    mid_list = db.read_movie_id()
+    mid_list = map(mid2int, mid_list)
+    mid_max = mid2int(mid_max)
+    missing = set(range(1, mid_max + 1)) - set(mid_list)
+
+    for mid_int in missing:
+        mid = int2mid(mid_int)
+        movie = spider.get_movie(mid)
+        movie['small'] = spider.search_movie(movie['id']) or ''
+        db.store_movie_detail(movie)
+
+
+if __name__ == '__main__':
+    fetch_missing()
