@@ -715,15 +715,14 @@ def down_movie_detail(spider, dbmanager):
 
 
 if __name__ == '__main__':
-    # db = DBManager(user='root', passwd='19961020', db='avmoo')
-    # db.create_db()
+    db = DBManager(user='root', passwd='19961020', db='avmoo')
+    db.create_db()
 
-    # proxies = Proxy.get_proxies_from_cn_proxy()
-    # Proxy.test_proxies(proxies, 'http://www.avmoo.net/cn', 2)
-    # spider = Spider('www.avmoo.net', proxies)
+    proxies = Proxy.get_proxies_from_cn_proxy()
+    Proxy.test_proxies(proxies, 'http://www.avmoo.net/cn', 2)
+    spider = Spider('www.avmoo.net', proxies)
 
-    # You can run those functions in the order
-    # down_star(spider, db, 182)  # 182 is the total page of actresses
+    # 分三个步骤进行，不需要一次执行成功。
+    down_star(spider, db, 182)  # 演员总页数
     # down_movie_id(spider, db)
     # down_movie_detail(spider, db)
-    pass
