@@ -1,37 +1,50 @@
 #!/usr/bin/env python3
 
 import re
-import socket
 import requests
 import signal
 from time import time, sleep
 
-import socks
 from bs4 import BeautifulSoup
 
+import socks
+import socket
 
-def http_get(url):
-    headers = {
-        'Connection': 'keep-alive',
-        'Cache-Control': 'max-age=0',
-        'Upgrade-Insecure-Requests': '1',
-        'Accept': 'text / html, application / xhtml + xml, application / xml;'
-                  'q = 0.9, image / webp, * / *;q = 0.8',
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Ubuntu Chromium/48.0.2564.116 Chrome/48.0.2564.116 Safari/537.36',
-        'Accept-Encoding': 'gzip, deflate, sdch',
-        'Accept-Language': 'en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,zh-TW;q=0.2',
-    }
-    socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 1081, True)
-    socket.socket = socks.socksocket
+socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 1081, True)
+socket.socket = socks.socksocket
 
+headers = {
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    'Accept': 'text / html, application / xhtml + xml, application / xml;'
+              'q = 0.9, image / webp, * / *;q = 0.8',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Ubuntu Chromium/48.0.2564.116 Chrome/48.0.2564.116 Safari/537.36',
+    'Accept-Encoding': 'gzip, deflate, sdch',
+    'Accept-Language': 'en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,zh-TW;q=0.2',
+}
+
+
+def log(msg):
+    print(msg)
+
+
+def http(url, data=None, session=None):
     try:
-        res = requests.get(url, headers=headers)
+        if data is None:
+            res = requests.get(url, headers=headers) if session is None \
+                else session.get(url, headers=headers)
+        else:
+            res = requests.post(url, headers=headers, data=data) if session is None \
+                else session.post(url, headers=headers, data=data)
+
         code = res.status_code
+        log('[{:d}] {:s} {:s}'.format(code, 'POST' if data is not None else 'GET', url))
 
         return res.text if code == 200 else ''
     except Exception as e:
-        print(e)
+        log(str(e))
         return ''
 
 
@@ -47,7 +60,7 @@ def from_pachong_org():
             'http://pachong.org/anonymous.html'
             ]
     for url in urls:
-        res = http_get(url)
+        res = http(url)
 
         # var duck=1159+2359
         m = re.search('var ([a-zA-Z]+)=(.*?);', res)
@@ -94,7 +107,7 @@ def from_cn_proxy():
     proxies = []
 
     for url in urls:
-        res = http_get(url)
+        res = http(url)
         data = re.findall('<td>(\d+\.\d+\.\d+\.\d+)</td>.*?<td>(\d+)</td>', res, re.DOTALL)
 
         for item in data:
@@ -108,7 +121,7 @@ def from_proxy_spy():
     :return:
     """
     url = 'http://txt.proxyspy.net/proxy.txt'
-    res = http_get(url)
+    res = http(url)
     proxies = re.findall('(\d+\.\d+\.\d+\.\d+:\d+) .*', res)
     return proxies
 
@@ -131,7 +144,7 @@ def from_xici_daili():
 
     proxies = []
     for url in urls:
-        res = http_get(url)
+        res = http(url)
         data = re.findall('<td>(\d+\.\d+\.\d+\.\d+)</td>.*?<td>(\d+)</td>', res, re.DOTALL)
         proxies += ['{:s}:{:s}'.format(host, port) for (host, port) in data]
     return proxies
@@ -152,7 +165,7 @@ def from_get_proxy():
 
     for i in range(len(urls)):
         sleep(10)
-        res = http_get(urls[i])
+        res = http(urls[i])
         soup = BeautifulSoup(res, 'lxml')
         proxies += [proxy.text for proxy in soup.find_all('ip')]
     return proxies
@@ -164,7 +177,7 @@ def from_hide_my_ip():
     :return:
     """
     url = 'https://www.hide-my-ip.com/proxylist.shtml'
-    res = http_get(url)
+    res = http(url)
 
     data = re.findall('"i":"(\d+\.\d+\.\d+\.\d+)","p":"(\d+)"', res)
     proxies = ['{:s}:{:s}'.format(host, port) for (host, port) in data]
@@ -183,13 +196,111 @@ def from_cyber_syndrome():
 
     proxies = []
     for url in urls:
-        res = http_get(url)
+        res = http(url)
         proxies += re.findall('(\d+\.\d+\.\d+\.\d+:\d+)', res)
     return proxies
 
 
+def from_free_proxy_list():
+    """
+    From "http://free-proxy-list.net/"
+    :return:
+    """
+    urls = [
+        'http://www.us-proxy.org/',
+        'http://free-proxy-list.net/uk-proxy.html'
+    ]
+    proxies = []
+
+    for url in urls:
+        res = http(url)
+        data = re.findall('<tr><td>(\d+\.\d+\.\d+\.\d+)</td><td>(\d+)</td>', res)
+        proxies += ['{:s}:{:s}'.format(host, port) for (host, port) in data]
+    return proxies
+
+
+def from_gather_proxy():
+    """
+    From "http://www.gatherproxy.com"
+    :return:
+    """
+    url_login = 'http://www.gatherproxy.com/subscribe/login'
+    url_info = 'http://www.gatherproxy.com/subscribe/infos'
+    url_download = 'http://www.gatherproxy.com/proxylist/downloadproxylist/?sid={:s}'
+
+    session = requests.session()  # enable cookie
+
+    # captcha like "Eight - 5"=?
+    operand_map = {
+        'Zero': 0, '0': 0,
+        'One': 1, '1': 1,
+        'Two': 2, '2': 2,
+        'Three': 3, '3': 3,
+        'Four': 4, '4': 4,
+        'Five': 5, '5': 5,
+        'Six': 6, '6': 6,
+        'Seven': 7, '7': 7,
+        'Eight': 8, '8': 8,
+        'Nine': 9, '9': 9
+    }
+    operator_map = {
+        'plus': '+', '+': '+',
+        'multiplied': '*', 'X': '*',
+        'minus': '-', '-': '-'
+    }
+
+    # get captcha
+    res = http(url_login, session=session)
+    m = re.search('Enter verify code: <span class="blue">(.*?) = </span>', res)
+    if not m:
+        return []
+
+    calcu = m.group(1).strip()
+    opers = calcu.split()
+    if len(opers) != 3:
+        return []
+
+    operand1 = operand_map.get(opers[0])
+    operator = operator_map.get(opers[1])
+    operand2 = operand_map.get(opers[2])
+
+    try:
+        result = eval('{} {} {}'.format(operand1, operator, operand2))
+    except:
+        return []
+
+    data = {
+        'Username': 'jun-kai-xin@163.com',
+        'Password': 'N}rS^>&3',
+        'Captcha': result
+    }
+
+    # post to login and redirect to info page to get download `id`
+    http(url_login, data=data, session=session)
+    res = http(url_info, session=session)
+
+    m = re.search('<p><a href="/proxylist/downloadproxylist/\?sid=(\d+)">Download', res)
+    if m is None:
+        return []
+
+    data = {
+        'ID': m.group(1),
+        'C': '',
+        'P': '',
+        'T': '',
+        'U': 90  # uptime
+    }
+
+    # post id to get proxy list
+    res = http(url_download.format(m.group(1)), data=data, session=session)
+    session.close()
+
+    proxies = res.split('\n')  # split the txt file
+    return proxies
+
+
 if __name__ == '__main__':
-    for proxy in from_cyber_syndrome():
+    for proxy in from_gather_proxy():
         print(proxy)
 
 
