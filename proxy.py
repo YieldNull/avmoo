@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 
+"""
+Get proxies from some free proxy sites.
+"""
+import logging
 import re
 import requests
-import signal
-from time import time, sleep
-
 from bs4 import BeautifulSoup
 
-import socks
-import socket
+# # local socks5 proxy setting
+# import socks
+# import socket
+#
+# socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 1081, True)
+# socket.socket = socks.socksocket
 
-socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 1081, True)
-socket.socket = socks.socksocket
-
+# http request headers
 headers = {
     'Connection': 'keep-alive',
     'Cache-Control': 'max-age=0',
@@ -25,26 +28,28 @@ headers = {
     'Accept-Language': 'en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,zh-TW;q=0.2',
 }
 
+# logging config
+logging.basicConfig(filename='/home/ubuntu/proxy.log', format='%(asctime)s %(message)s', level=logging.INFO)
+
 
 def log(msg):
     print(msg)
 
 
-def http(url, data=None, session=None):
+def http(url, data=None, session=None, proxy=None):
     try:
         if data is None:
-            res = requests.get(url, headers=headers) if session is None \
-                else session.get(url, headers=headers)
+            res = requests.get(url, headers=headers, proxies=proxy) if session is None \
+                else session.get(url, headers=headers, proxies=proxy)
         else:
-            res = requests.post(url, headers=headers, data=data) if session is None \
-                else session.post(url, headers=headers, data=data)
+            res = requests.post(url, headers=headers, data=data, proxies=proxy) if session is None \
+                else session.post(url, headers=headers, data=data, proxies=proxy)
 
         code = res.status_code
         log('[{:d}] {:s} {:s}'.format(code, 'POST' if data is not None else 'GET', url))
 
         return res.text if code == 200 else ''
-    except Exception as e:
-        log(str(e))
+    except:
         return ''
 
 
@@ -75,7 +80,10 @@ def from_pachong_org():
         for expr in exprs:
             var[expr[0]] = int(expr[1]) + int(expr[2]) ^ var[expr[3]]
 
-        soup = BeautifulSoup(res, 'lxml')
+        try:
+            soup = BeautifulSoup(res, 'lxml')
+        except:
+            continue
         table = soup.find('table', class_='tb')
 
         for tr in table.find_all('tr'):
@@ -147,27 +155,6 @@ def from_xici_daili():
         res = http(url)
         data = re.findall('<td>(\d+\.\d+\.\d+\.\d+)</td>.*?<td>(\d+)</td>', res, re.DOTALL)
         proxies += ['{:s}:{:s}'.format(host, port) for (host, port) in data]
-    return proxies
-
-
-def from_get_proxy():
-    """
-    From "http://www.getproxy.jp"
-    :return:
-    """
-    base = 'http://www.getproxy.jp/proxyapi?' \
-           'ApiKey=659eb61dd7a5fc509bef01f2e8b15669dfdb0f54' \
-           '&area={:s}&sort=requesttime&orderby=asc&page={:d}'
-
-    urls = [base.format('CN', i) for i in range(1, 20)]
-    urls += [base.format('US', i) for i in range(1, 20)]
-    proxies = []
-
-    for i in range(len(urls)):
-        sleep(10)
-        res = http(urls[i])
-        soup = BeautifulSoup(res, 'lxml')
-        proxies += [proxy.text for proxy in soup.find_all('ip')]
     return proxies
 
 
@@ -299,9 +286,29 @@ def from_gather_proxy():
     return proxies
 
 
-if __name__ == '__main__':
-    for proxy in from_gather_proxy():
-        print(proxy)
+def from_get_proxy(proxies_helper):
+    """
+    From "http://www.getproxy.jp"
+    :return:
+    """
+    import random
+    base = 'http://www.getproxy.jp/proxyapi?' \
+           'ApiKey=659eb61dd7a5fc509bef01f2e8b15669dfdb0f54' \
+           '&area={:s}&sort=requesttime&orderby=asc&page={:d}'
+
+    urls = [base.format('CN', i) for i in range(1, 101)]
+    urls += [base.format('US', i) for i in range(1, 101)]
+    proxies = []
+
+    for i in range(len(urls)):
+        proxy = random.choice(proxies_helper)
+        res = http(urls[i], proxy={'http': 'http://{:s}'.format(proxy)})
+        try:
+            soup = BeautifulSoup(res, 'lxml')
+        except:
+            continue
+        proxies += [pro.text for pro in soup.find_all('ip')]
+    return proxies
 
 
 def test_proxies(proxies, url, timeout):
@@ -312,31 +319,49 @@ def test_proxies(proxies, url, timeout):
     :param timeout: 响应时间(s)
     :return:
     """
+    import signal
+    from time import time
 
     def handler(signum, frame):
         raise requests.exceptions.Timeout()
 
-    errors = []
+    proxies = set(proxies)
+    errors = set()
     for proxy in proxies:
         try:
             signal.signal(signal.SIGALRM, handler)
             signal.alarm(timeout)
             start = time()
-            res = requests.get(url, proxies={'http': proxy})
+            res = requests.head(url, proxies={'http': 'http://{:s}'.format(proxy.strip())})  # use head instead of get
             end = time()
-        except (requests.exceptions.ConnectionError, socket.error):
-            print('[Proxy: %s] ConnectionError' % proxy)
-            errors.append(proxy)
-        except requests.exceptions.Timeout:
-            print('[Proxy: %s] ConnectTimeout' % proxy)
-            errors.append(proxy)
+        except Exception as e:
+            print(e)
+            errors.add(proxy)
         else:
             if res.status_code != 200:
-                print('[HTTP: %d  ERROR]' % res.status_code)
+                log('[HTTP: %d  ERROR]' % res.status_code)
             else:
                 escape = end - start
-                print('[Proxy: %s] Time:%f Length:%d' % (proxy, escape, len(res.text)))
+                log('[Proxy: %s] Time:%f Length:%d' % (proxy, escape, len(res.text)))
         finally:
             signal.alarm(0)
-    map(proxies.remove, errors)
-    print('[HTTP Proxies] Available:%d Deprecated:%d' % (len(proxies), len(errors)))
+    proxies = proxies - errors
+    log('[HTTP Proxies] Available:%d Deprecated:%d' % (len(proxies), len(errors)))
+
+
+if __name__ == '__main__':
+    functions = [
+        from_pachong_org, from_cn_proxy,
+        from_proxy_spy, from_xici_daili,
+        from_hide_my_ip, from_cyber_syndrome,
+        from_free_proxy_list, from_gather_proxy
+    ]
+
+    proxies = []
+    for func in functions:
+        proxies += func()
+        log('[{:s}] {:d} proxies'.format(func.__name__, len(proxies)))
+
+        # proxies += from_get_proxy(proxies)# deprecated
+    log('Proxies amount: {:d}'.format(len(proxies)))
+    test_proxies(proxies, 'http://www.baidu.com', 1)
