@@ -2,18 +2,20 @@
 
 """
 Get proxies from some free proxy sites.
+
+Cron:
+    0 */3 * * * /home/ubuntu/proxy.py
+
 """
-import logging
+import datetime
 import re
 import requests
-from bs4 import BeautifulSoup
+import logging
 
-# # local socks5 proxy setting
-# import socks
-# import socket
-#
-# socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 1081, True)
-# socket.socket = socks.socksocket
+from logging.handlers import RotatingFileHandler
+from time import time
+from bs4 import BeautifulSoup
+from peewee import MySQLDatabase, CharField, DateTimeField, Model, FloatField, BooleanField, IntegrityError
 
 # http request headers
 headers = {
@@ -29,11 +31,44 @@ headers = {
 }
 
 # logging config
-logging.basicConfig(filename='/home/ubuntu/proxy.log', format='%(asctime)s %(message)s', level=logging.INFO)
+logging.getLogger("requests").setLevel(logging.WARNING)
+
+handler = RotatingFileHandler('/home/ubuntu/proxy.log', mode='a', maxBytes=50 * 1024 * 1024, backupCount=2)
+handler.setFormatter(logging.Formatter('[%(asctime)s] %(message)s'))
+handler.setLevel(logging.INFO)
+
+logger = logging.getLogger('root')
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
+
+# database
+db = MySQLDatabase(database='proxies', user='root', password='19961020')
+
+
+class Proxy(Model):
+    proxy = CharField(primary_key=True)
+    check_time = DateTimeField(null=True)
+    response_time = FloatField(null=True)
+    available = BooleanField(null=True)
+
+    class Meta:
+        database = db
+
+
+def store_in_db(proxy, escaped=None, status_code=200, is_failed=False):
+    try:
+        available = True if (not is_failed) and (status_code == 200) else False
+        try:
+            Proxy.create(proxy=proxy, check_time=datetime.datetime.now(), response_time=escaped, available=available)
+        except IntegrityError:
+            Proxy.update(check_time=datetime.datetime.now(), response_time=escaped,
+                         available=available).where(Proxy.proxy == proxy).execute()
+    except Exception as e:
+        log(str(e))
 
 
 def log(msg):
-    print(msg)
+    logger.info(msg)
 
 
 def http(url, data=None, session=None, proxy=None):
@@ -320,36 +355,40 @@ def test_proxies(proxies, url, timeout):
     :return:
     """
     import signal
-    from time import time
 
     def handler(signum, frame):
-        raise requests.exceptions.Timeout()
+        raise Exception('[Timeout]')
 
     proxies = set(proxies)
     errors = set()
     for proxy in proxies:
+        escape = None
+        failed = False
+        code = 403
         try:
             signal.signal(signal.SIGALRM, handler)
-            signal.alarm(timeout)
+            signal.setitimer(signal.ITIMER_REAL, timeout)
             start = time()
-            res = requests.head(url, proxies={'http': 'http://{:s}'.format(proxy.strip())})  # use head instead of get
+            res = requests.head(url, proxies={'http': 'http://{:s}'.format(proxy.strip())})  # use HEAD instead of GET
             end = time()
+            code = res.status_code
         except Exception as e:
-            print(e)
+            log('{:s} proxy:"{:s}"'.format(str(e), proxy))
+            failed = True
             errors.add(proxy)
         else:
-            if res.status_code != 200:
-                log('[HTTP: %d  ERROR]' % res.status_code)
-            else:
-                escape = end - start
-                log('[Proxy: %s] Time:%f Length:%d' % (proxy, escape, len(res.text)))
+            escape = end - start
+            log('[Proxy: {:s}] Time:{:f}'.format(proxy, escape))
         finally:
             signal.alarm(0)
+        store_in_db(proxy, escaped=escape, status_code=code, is_failed=failed)
+
     proxies = proxies - errors
-    log('[HTTP Proxies] Available:%d Deprecated:%d' % (len(proxies), len(errors)))
+    log('[HTTP Proxies] Available:{:d} Deprecated:{:d}'.format(len(proxies), len(errors)))
 
 
 if __name__ == '__main__':
+    db.create_table(Proxy, safe=True)
     functions = [
         from_pachong_org, from_cn_proxy,
         from_proxy_spy, from_xici_daili,
@@ -359,9 +398,12 @@ if __name__ == '__main__':
 
     proxies = []
     for func in functions:
-        proxies += func()
-        log('[{:s}] {:d} proxies'.format(func.__name__, len(proxies)))
+        pro = func()
+        log('[{:s}] {:d} proxies'.format(func.__name__, len(pro)))
+        proxies += pro
 
-        # proxies += from_get_proxy(proxies)# deprecated
+    # deprecated
+    # proxies += from_get_proxy(proxies)
+
     log('Proxies amount: {:d}'.format(len(proxies)))
-    test_proxies(proxies, 'http://www.baidu.com', 1)
+    test_proxies(proxies, 'http://avday.org/', 1)
