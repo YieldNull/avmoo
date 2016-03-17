@@ -4,13 +4,14 @@
 Get proxies from some free proxy sites.
 
 Cron:
-    0 */3 * * * /home/ubuntu/proxy.py
+    0 */6 * * * /home/ubuntu/proxy.py
 
 """
 import datetime
 import re
 import requests
 import logging
+import random
 
 from logging.handlers import RotatingFileHandler
 from time import time
@@ -29,6 +30,20 @@ headers = {
     'Accept-Encoding': 'gzip, deflate, sdch',
     'Accept-Language': 'en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,zh-TW;q=0.2',
 }
+
+user_agents = [
+    'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:45.0) Gecko/20100101 Firefox/45.0',
+    'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.75 Safari/537.36 OPR/36.0.2130.32',
+    'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/45.0.2454.101 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/48.0.2564.116 UBrowser/5.6.10551.6 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2490.80 Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 4.4.4; HTC D820mt Build/KTU84P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.91 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 5.0; Google Nexus 5 - 5.0.0 - API 21 - 1080x1920 Build/LRX21M) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/37.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/48.0.2564.116 Chrome/48.0.2564.116 Safari/537.36',
+    'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:45.0) Gecko/20100101 Firefox/45.0'
+]
 
 # logging config
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -73,6 +88,7 @@ def log(msg):
 
 def http(url, data=None, session=None, proxy=None):
     try:
+        headers['User-Agent'] = random.choice(user_agents)
         if data is None:
             res = requests.get(url, headers=headers, proxies=proxy) if session is None \
                 else session.get(url, headers=headers, proxies=proxy)
@@ -326,7 +342,6 @@ def from_get_proxy(proxies_helper):
     From "http://www.getproxy.jp"
     :return:
     """
-    import random
     base = 'http://www.getproxy.jp/proxyapi?' \
            'ApiKey=659eb61dd7a5fc509bef01f2e8b15669dfdb0f54' \
            '&area={:s}&sort=requesttime&orderby=asc&page={:d}'
@@ -369,7 +384,7 @@ def test_proxies(proxies, url, timeout):
             signal.signal(signal.SIGALRM, handler)
             signal.setitimer(signal.ITIMER_REAL, timeout)
             start = time()
-            res = requests.head(url, proxies={'http': 'http://{:s}'.format(proxy.strip())})  # use HEAD instead of GET
+            res = requests.get(url, proxies={'http': 'http://{:s}'.format(proxy.strip())})
             end = time()
             code = res.status_code
         except Exception as e:
@@ -378,7 +393,7 @@ def test_proxies(proxies, url, timeout):
             errors.add(proxy)
         else:
             escape = end - start
-            log('[Proxy: {:s}] Time:{:f}'.format(proxy, escape))
+            log('[Proxy: {:d} {:s}] Time:{:f}'.format(code, proxy, escape))
         finally:
             signal.alarm(0)
         store_in_db(proxy, escaped=escape, status_code=code, is_failed=failed)
