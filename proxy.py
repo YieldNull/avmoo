@@ -4,17 +4,27 @@
 Get proxies from some free proxy sites.
 
 Cron:
-    0 */6 * * * /home/ubuntu/proxy.py
+    0 * * * * /home/ubuntu/proxy.py
 
 """
+import os
+
+import gevent
+from gevent import monkey
+
+monkey.patch_all()
+
+import requests
+from gevent.pool import Pool
+
 import datetime
 import re
-import requests
+
 import logging
 import random
-
+import sys
 from logging.handlers import RotatingFileHandler
-from time import time
+from time import time, sleep
 from bs4 import BeautifulSoup
 from peewee import MySQLDatabase, CharField, DateTimeField, Model, FloatField, BooleanField, IntegrityError
 
@@ -45,10 +55,11 @@ user_agents = [
     'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:45.0) Gecko/20100101 Firefox/45.0'
 ]
 
-# logging config
+# # logging config
 logging.getLogger("requests").setLevel(logging.WARNING)
 
-handler = RotatingFileHandler('/home/ubuntu/proxy.log', mode='a', maxBytes=50 * 1024 * 1024, backupCount=2)
+log_file = os.path.join(os.path.expanduser("~"), 'proxy.log')
+handler = RotatingFileHandler(log_file, mode='a', maxBytes=50 * 1024 * 1024, backupCount=2)
 handler.setFormatter(logging.Formatter('[%(asctime)s] %(message)s'))
 handler.setLevel(logging.INFO)
 
@@ -58,6 +69,8 @@ logger.addHandler(handler)
 
 # database
 db = MySQLDatabase(database='proxies', user='root', password='19961020')
+
+using_logger = False
 
 
 class Proxy(Model):
@@ -70,37 +83,41 @@ class Proxy(Model):
         database = db
 
 
-def store_in_db(proxy, escaped=None, status_code=200, is_failed=False):
+def store_in_db(proxy, escaped=None, status_code=403, is_failed=False):
     try:
-        available = True if (not is_failed) and (status_code == 200) else False
+        available = True if (not is_failed) and (status_code != 403) else False
         try:
             Proxy.create(proxy=proxy, check_time=datetime.datetime.now(), response_time=escaped, available=available)
         except IntegrityError:
             Proxy.update(check_time=datetime.datetime.now(), response_time=escaped,
                          available=available).where(Proxy.proxy == proxy).execute()
     except Exception as e:
-        log(str(e))
+        log(e.args)
 
 
 def log(msg):
-    logger.info(msg)
+    if using_logger:
+        logger.info(msg)
+    else:
+        print(msg)
 
 
-def http(url, data=None, session=None, proxy=None):
+def http(url, data=None, session=None, proxies=None):
     try:
         headers['User-Agent'] = random.choice(user_agents)
         if data is None:
-            res = requests.get(url, headers=headers, proxies=proxy) if session is None \
-                else session.get(url, headers=headers, proxies=proxy)
+            res = requests.get(url, headers=headers, proxies=proxies) if session is None \
+                else session.get(url, headers=headers, proxies=proxies)
         else:
-            res = requests.post(url, headers=headers, data=data, proxies=proxy) if session is None \
-                else session.post(url, headers=headers, data=data, proxies=proxy)
+            res = requests.post(url, headers=headers, data=data, proxies=proxies) if session is None \
+                else session.post(url, headers=headers, data=data, proxies=proxies)
 
         code = res.status_code
         log('[{:d}] {:s} {:s}'.format(code, 'POST' if data is not None else 'GET', url))
-
         return res.text if code == 200 else ''
-    except:
+    except Exception as e:
+        # log(e.args)
+        # log('[{:s}] {:s} {:s}'.format('HTTP Error', 'POST' if data is not None else 'GET', url))
         return ''
 
 
@@ -116,6 +133,7 @@ def from_pachong_org():
             'http://pachong.org/anonymous.html'
             ]
     for url in urls:
+        sleep(0.5)
         res = http(url)
 
         # var duck=1159+2359
@@ -166,6 +184,7 @@ def from_cn_proxy():
     proxies = []
 
     for url in urls:
+        sleep(0.5)
         res = http(url)
         data = re.findall('<td>(\d+\.\d+\.\d+\.\d+)</td>.*?<td>(\d+)</td>', res, re.DOTALL)
 
@@ -203,6 +222,7 @@ def from_xici_daili():
 
     proxies = []
     for url in urls:
+        sleep(4)
         res = http(url)
         data = re.findall('<td>(\d+\.\d+\.\d+\.\d+)</td>.*?<td>(\d+)</td>', res, re.DOTALL)
         proxies += ['{:s}:{:s}'.format(host, port) for (host, port) in data]
@@ -234,6 +254,7 @@ def from_cyber_syndrome():
 
     proxies = []
     for url in urls:
+        sleep(0.5)
         res = http(url)
         proxies += re.findall('(\d+\.\d+\.\d+\.\d+:\d+)', res)
     return proxies
@@ -251,6 +272,7 @@ def from_free_proxy_list():
     proxies = []
 
     for url in urls:
+        sleep(0.5)
         res = http(url)
         data = re.findall('<tr><td>(\d+\.\d+\.\d+\.\d+)</td><td>(\d+)</td>', res)
         proxies += ['{:s}:{:s}'.format(host, port) for (host, port) in data]
@@ -337,7 +359,7 @@ def from_gather_proxy():
     return proxies
 
 
-def from_get_proxy(proxies_helper):
+def from_get_proxy():
     """
     From "http://www.getproxy.jp"
     :return:
@@ -346,18 +368,35 @@ def from_get_proxy(proxies_helper):
            'ApiKey=659eb61dd7a5fc509bef01f2e8b15669dfdb0f54' \
            '&area={:s}&sort=requesttime&orderby=asc&page={:d}'
 
-    urls = [base.format('CN', i) for i in range(1, 101)]
-    urls += [base.format('US', i) for i in range(1, 101)]
+    urls = [base.format('CN', i) for i in range(1, 25)]
+    urls += [base.format('US', i) for i in range(1, 25)]
+    urls += [base.format('CN', i) for i in range(25, 100)]
+    urls += [base.format('US', i) for i in range(25, 100)]
+
     proxies = []
 
-    for i in range(len(urls)):
-        proxy = random.choice(proxies_helper)
-        res = http(urls[i], proxy={'http': 'http://{:s}'.format(proxy)})
+    i = 0
+    retry = 0
+    length = len(urls)
+    while i < length:
+        res = http(urls[i])
         try:
             soup = BeautifulSoup(res, 'lxml')
         except:
+            i += 1
             continue
-        proxies += [pro.text for pro in soup.find_all('ip')]
+
+        data = soup.find_all('ip')
+        if len(data) == 0:
+            retry += 1
+            if retry == 4:
+                break
+            else:
+                sleep(62)
+        else:
+            retry = 0
+            proxies += [pro.text for pro in data]
+            i += 1
     return proxies
 
 
@@ -369,46 +408,48 @@ def test_proxies(proxies, url, timeout):
     :param timeout: 响应时间(s)
     :return:
     """
-    import signal
-
-    def handler(signum, frame):
-        raise Exception('[Timeout]')
 
     proxies = set(proxies)
     errors = set()
-    for proxy in proxies:
-        escape = None
+    pool = Pool(100)
+
+    def test(proxy):
         failed = False
         code = 403
         try:
-            signal.signal(signal.SIGALRM, handler)
-            signal.setitimer(signal.ITIMER_REAL, timeout)
-            start = time()
-            res = requests.get(url, proxies={'http': 'http://{:s}'.format(proxy.strip())})
-            end = time()
-            code = res.status_code
+            with gevent.Timeout(seconds=timeout, exception=Exception('[Connection Timeout]')):
+                res = requests.get(url, proxies={'http': 'http://{}'.format(proxy.strip()),
+                                                 'https': 'https://{}'.format(proxy.strip())})
+                code = res.status_code
+            log('[Proxy: {:d} {:s}]'.format(code, proxy))
         except Exception as e:
-            log('{:s} proxy:"{:s}"'.format(str(e), proxy))
+            # log(e.args)
             failed = True
             errors.add(proxy)
-        else:
-            escape = end - start
-            log('[Proxy: {:d} {:s}] Time:{:f}'.format(code, proxy, escape))
-        finally:
-            signal.alarm(0)
-        store_in_db(proxy, escaped=escape, status_code=code, is_failed=failed)
+
+        store_in_db(proxy, status_code=code, is_failed=failed)
+
+    for proxy in proxies:
+        pool.spawn(test, proxy)
+    pool.join()
 
     proxies = proxies - errors
     log('[HTTP Proxies] Available:{:d} Deprecated:{:d}'.format(len(proxies), len(errors)))
 
+    return list(proxies)
+
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        using_logger = True
+
     db.create_table(Proxy, safe=True)
     functions = [
         from_pachong_org, from_cn_proxy,
         from_proxy_spy, from_xici_daili,
         from_hide_my_ip, from_cyber_syndrome,
-        from_free_proxy_list, from_gather_proxy
+        from_free_proxy_list, from_gather_proxy,
+        from_get_proxy
     ]
 
     proxies = []
@@ -417,8 +458,5 @@ if __name__ == '__main__':
         log('[{:s}] {:d} proxies'.format(func.__name__, len(pro)))
         proxies += pro
 
-    # deprecated
-    # proxies += from_get_proxy(proxies)
-
+    proxies = test_proxies(proxies, 'https://avmo.pw/', 10)
     log('Proxies amount: {:d}'.format(len(proxies)))
-    test_proxies(proxies, 'http://avday.org/', 1)
