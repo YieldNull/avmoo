@@ -4,3 +4,4 @@ requests
 PyMySQL
 peewee
 gevent
+pymongo

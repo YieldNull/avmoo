@@ -4,29 +4,29 @@
 Get proxies from some free proxy sites.
 
 Cron:
-    0 * * * * /home/ubuntu/proxy.py
+    0 * * * * /home/ubuntu/proxy.py -l
 
 """
-import os
-
 import gevent
 from gevent import monkey
 
 monkey.patch_all()
 
-import requests
 from gevent.pool import Pool
 
+import os
+import requests
 import datetime
 import re
-
 import logging
 import random
 import sys
+
 from logging.handlers import RotatingFileHandler
 from time import time, sleep
 from bs4 import BeautifulSoup
 from peewee import MySQLDatabase, CharField, DateTimeField, Model, FloatField, BooleanField, IntegrityError
+from avmoo import int2mid
 
 # http request headers
 headers = {
@@ -39,6 +39,11 @@ headers = {
                   'Ubuntu Chromium/48.0.2564.116 Chrome/48.0.2564.116 Safari/537.36',
     'Accept-Encoding': 'gzip, deflate, sdch',
     'Accept-Language': 'en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,zh-TW;q=0.2',
+    'Cookie': '__cfduid=dc8923d6d41cddd5038668885a97b61a11458400017; '
+              'AD_enterTime=1458400024; AD_juic_j_L_728x90=0; AD_wav_j_L_728x90=0; AD_exoc_j_POPUNDER=1;'
+              ' AD_clic_j_POPUNDER=2; AD_adst_j_POPUNDER=1; AD_traf_j_POPUNDER=1; AD_exoc_j_L_728x90=4; '
+              'AD_exoc_j_M_728x90=4; AD_javu_j_L_728x90=2; AD_juic_j_M_728x90=1; '
+              'AD_bts_j_P_728x90=5; _gat=1; _ga=GA1.2.2125902479.1458400018'
 }
 
 user_agents = [
@@ -85,7 +90,7 @@ class Proxy(Model):
 
 def store_in_db(proxy, escaped=None, status_code=403, is_failed=False):
     try:
-        available = True if (not is_failed) and (status_code != 403) else False
+        available = True if (not is_failed)  else False
         try:
             Proxy.create(proxy=proxy, check_time=datetime.datetime.now(), response_time=escaped, available=available)
         except IntegrityError:
@@ -400,7 +405,7 @@ def from_get_proxy():
     return proxies
 
 
-def test_proxies(proxies, url, timeout):
+def test_proxies(proxies, timeout, single_url=None, many_urls=None):
     """
     测试代理。剔除响应时间大于timeout的代理
     :param proxies:  代理列表
@@ -416,6 +421,8 @@ def test_proxies(proxies, url, timeout):
     def test(proxy):
         failed = False
         code = 403
+        url = random.choice(many_urls) if many_urls is not None else single_url
+
         try:
             with gevent.Timeout(seconds=timeout, exception=Exception('[Connection Timeout]')):
                 res = requests.get(url, proxies={'http': 'http://{}'.format(proxy.strip()),
@@ -439,17 +446,18 @@ def test_proxies(proxies, url, timeout):
     return list(proxies)
 
 
-if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        using_logger = True
-
+def update():
+    """
+    从上面的网站爬取最新的代理ip
+    """
     db.create_table(Proxy, safe=True)
     functions = [
-        from_pachong_org, from_cn_proxy,
+        from_cn_proxy,
         from_proxy_spy, from_xici_daili,
         from_hide_my_ip, from_cyber_syndrome,
         from_free_proxy_list, from_gather_proxy,
-        from_get_proxy
+        from_get_proxy,
+        # from_pachong_org,
     ]
 
     proxies = []
@@ -458,5 +466,21 @@ if __name__ == '__main__':
         log('[{:s}] {:d} proxies'.format(func.__name__, len(pro)))
         proxies += pro
 
-    proxies = test_proxies(proxies, 'https://avmo.pw/', 10)
+    proxies = test_proxies(proxies, 10, single_url='https://www.baidu.com')
     log('Proxies amount: {:d}'.format(len(proxies)))
+
+
+def check():
+    """
+    测试以及爬取的ip的可用性
+    """
+    proxies = [proxy.proxy for proxy in Proxy.select()]
+    urls = ['https://www.avmoo.com/cn/movie/{}'.format(int2mid(i)) for i in range(1, 252604)]
+    test_proxies(proxies, 10, many_urls=urls)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        using_logger = True
+    update()
+    # check()
