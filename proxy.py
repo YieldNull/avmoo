@@ -20,7 +20,6 @@ import datetime
 import re
 import logging
 import random
-import sys
 
 from logging.handlers import RotatingFileHandler
 from time import time, sleep
@@ -93,6 +92,7 @@ def store_in_db(proxy, escaped=None, status_code=None):
     :param escaped:  响应时间
     :param status_code: 返回码，为空则表示访问失败，proxy不可用
     """
+    proxy = proxy.strip()
     try:
         try:
             Proxy.create(proxy=proxy, check_time=datetime.datetime.now(), response_time=escaped,
@@ -459,9 +459,7 @@ def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=No
     :param timeout: 响应时间(s)
     :param single_url: 用作测试的url
     :param many_urls: 用作测试的url列表，测试时从中随机选取一个
-    :param call_back: 处理测试url对应网页的源码
-    :param kwargs: call_back(url,source,*args,**kwargs)
-    :param args: call_back(url,source,*args,**kwargs)
+    :param call_back: 处理测试url对应网页的源码,callback(url,source)
     :return:
     """
 
@@ -475,8 +473,17 @@ def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=No
 
         try:
             with gevent.Timeout(seconds=timeout, exception=Exception('[Connection Timeout]')):
-                res = requests.get(url, proxies={'http': 'http://{}'.format(proxy.strip()),
-                                                 'https': 'https://{}'.format(proxy.strip())})
+                headers['User-Agent'] = random.choice(user_agents)
+                headers['Cookie'] = '__test; AD_enterTime=1459339124; AD_wav_j_M_728x90=0; AD_exoc_j_M_728x90=1; ' \
+                                    'AD_exoc_j_POPUNDER=1; AD_javu_j_M_728x90=1; _gat=1; AD_juic_j_L_728x90=1; ' \
+                                    '__test; AD_juic_j_M_728x90=1; AD_bts_j_P_728x90=3; AD_clic_j_POPUNDER=3; ' \
+                                    '_ga=GA1.2.981862313.1458217151'
+
+                res = requests.get(url,
+                                   proxies={'http': 'http://{}'.format(proxy.strip()),
+                                            'https': 'https://{}'.format(proxy.strip())},
+                                   headers=headers
+                                   )
                 code = res.status_code
                 source = res.text
 
@@ -506,6 +513,8 @@ def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=No
 
 
 if __name__ == '__main__':
+    import sys
+
     if len(sys.argv) > 1:
         using_logger = True
 
