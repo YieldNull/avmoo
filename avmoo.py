@@ -4,9 +4,15 @@
 利用爬取的代理IP，爬取avmoo.com的影片信息。存入mongodb。
 """
 
+# 第一导入，因为proxy中使用了monkey_patch()
+from proxy import get_proxies, test_proxies, log, Proxy, safe_http, enable_logger
+
+from gevent import sleep
+from gevent.pool import Pool
+import gevent
 import re
-import requests
-from datetime import datetime
+import pymongo
+import random
 
 from bs4 import BeautifulSoup
 from pymongo import MongoClient
@@ -73,18 +79,19 @@ def safe_search(ptn, src, pair=False, integer=False):
             return ''
 
 
-def get_movie(mid, domain, https=True):
+def get_movie(url, source):
     """
     获取指定影片的全部信息
     参见 "https://www.avmoo.com/cn/movie/500"
 
-    :param mid:  影片36进制id
-    :param domain: 网站域名，如'www.avmoo.com'
-    :param https: 默认使用https
+    :param url: 网页url
+    :param source: 网页源码
     :return:
     """
-    protocol = 'https' if https else 'http'
-    ptn_server = '{:s}://{:s}/cn'.format(protocol, domain).replace('.', '\.')
+    mid = re.search('.*?/movie/(.*)', url).group(1)
+
+    server = re.search('(.*?)/movie/.*', url).group(1)
+    ptn_server = server.replace('.', '\.')
 
     ptn_name = '<h3>(.*?)</h3>'
     ptn_fid = '<span class="header">识别码:</span> <span.*?>(.*?)</span>'
@@ -102,10 +109,10 @@ def get_movie(mid, domain, https=True):
     ptn_sample = '<a class="sample-box.*?" href="(.*?)">'
     ptn_star = '{:s}/star/(.*)'.format(ptn_server)
 
-    url = 'https://www.avmoo.com/cn/movie/{:s}'.format(mid)
-    source = requests.get(url).text
-
     name = safe_search(ptn_name, source)  # 片名
+    if len(name) < 1:  # not 200
+        return None
+
     fid = safe_search(ptn_fid, source)  # 番号
     time = safe_search(ptn_time, source)  # 发行时间
     length = safe_search(ptn_length, source, integer=True)  # 片长，单位分钟
@@ -162,5 +169,85 @@ def get_movie(mid, domain, https=True):
     return document
 
 
+def store_movie(url, source):
+    """
+    将电影信息存入mongodb
+    :param url: 电影url
+    :param source: 对应的源码
+    """
+    document = get_movie(url, source)
+
+    if document is not None:
+        try:
+            result = db.movie.insert_one(document)
+            log('[Mongodb] store document {:s}'.format(str(result.inserted_id)))
+        except pymongo.errors.DuplicateKeyError:
+            pass
+
+
+def get_missing():
+    """
+    get还没有爬的movie列表
+    :return: mid的10进制形式
+    """
+    cursor = db.movie.find(filter=None, projection={'mid': True, '_id': False})
+    proxies = [mid2int(document['mid']) for document in cursor]
+    cursor.close()
+
+    available = set(range(1, mid2int('5flj')))
+    instore = set(proxies)
+
+    return list(available - instore)
+
+
+def fetch_when_test():
+    """
+    测试代理ip的同时进行爬取目标页面信息
+    """
+    missing = get_missing()
+    ps = get_proxies()
+    urls = ['https://www.avmoo.com/cn/movie/{:s}'.format(int2mid(i)) for i in missing]
+    test_proxies(ps, 10, many_urls=urls, call_back=store_movie)
+
+
+def fetch_continually():
+    """
+    使用已有的代理ip来爬
+    """
+
+    def job(url, proxy):
+        try:
+            with gevent.Timeout(seconds=10, exception=Exception('[Connection Timeout]')):
+                source = safe_http(url,
+                                   proxies={'https': 'https://{}'.format(proxy), 'http': 'http://{}'.format(proxy)})
+                store_movie(url, source)
+        except:
+            pass
+
+    query = Proxy.select().where(~(Proxy.status_code >> None))
+    missing = get_missing()
+
+    pool = Pool(100)
+    while True:
+        for proxy in query:
+            index = random.randint(0, len(missing) - 1)
+            int_mid = missing[index]
+            missing.pop(index)
+
+            url = 'https://www.avmoo.com/cn/movie/{:s}'.format(int2mid(int_mid))
+            pool.spawn(job, url, proxy.proxy)
+        pool.join()
+        sleep(0.5)
+
+        if len(missing) < 2000:
+            break
+
+
 if __name__ == '__main__':
-    db.movie.insert_one(get_movie('5555', 'www.avmoo.com'))
+    import sys
+
+    if len(sys.argv) > 1:
+        enable_logger()
+
+    fetch_when_test()
+    # fetch_continually()

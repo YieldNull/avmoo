@@ -25,8 +25,8 @@ import sys
 from logging.handlers import RotatingFileHandler
 from time import time, sleep
 from bs4 import BeautifulSoup
-from peewee import MySQLDatabase, CharField, DateTimeField, Model, FloatField, BooleanField, IntegrityError
-from avmoo import int2mid
+from peewee import MySQLDatabase, CharField, DateTimeField, Model, FloatField, BooleanField, IntegrityError, \
+    IntegerField
 
 # http request headers
 headers = {
@@ -63,7 +63,7 @@ user_agents = [
 # # logging config
 logging.getLogger("requests").setLevel(logging.WARNING)
 
-log_file = os.path.join(os.path.expanduser("~"), 'proxy.log')
+log_file = os.path.join(os.path.join(os.path.expanduser("~"), 'proxy'), 'proxy.log')
 handler = RotatingFileHandler(log_file, mode='a', maxBytes=50 * 1024 * 1024, backupCount=2)
 handler.setFormatter(logging.Formatter('[%(asctime)s] %(message)s'))
 handler.setLevel(logging.INFO)
@@ -79,25 +79,39 @@ using_logger = False
 
 
 class Proxy(Model):
-    proxy = CharField(primary_key=True)
-    check_time = DateTimeField(null=True)
-    response_time = FloatField(null=True)
-    available = BooleanField(null=True)
+    """
+    数据库model
+    """
+    proxy = CharField(primary_key=True)  # ip:port
+    check_time = DateTimeField(null=True)  # 测试时间
+    response_time = FloatField(null=True)  # 响应时间
+    status_code = IntegerField(null=True)  # 返回状态码
 
     class Meta:
         database = db
 
 
-def store_in_db(proxy, escaped=None, status_code=403, is_failed=False):
+def store_in_db(proxy, escaped=None, status_code=None):
+    """
+    将测试过的proxy的信息存入数据库
+    :param proxy:  port:ip
+    :param escaped:  响应时间
+    :param status_code: 返回码，为空则表示访问失败，proxy不可用
+    """
     try:
-        available = True if (not is_failed)  else False
         try:
-            Proxy.create(proxy=proxy, check_time=datetime.datetime.now(), response_time=escaped, available=available)
+            Proxy.create(proxy=proxy, check_time=datetime.datetime.now(), response_time=escaped,
+                         status_code=status_code)
         except IntegrityError:
             Proxy.update(check_time=datetime.datetime.now(), response_time=escaped,
-                         available=available).where(Proxy.proxy == proxy).execute()
+                         status_code=status_code).where(Proxy.proxy == proxy).execute()
     except Exception as e:
         log(e.args)
+
+
+def enable_logger():
+    global using_logger
+    using_logger = True
 
 
 def log(msg):
@@ -107,19 +121,33 @@ def log(msg):
         print(msg)
 
 
-def http(url, data=None, session=None, proxies=None):
+def safe_http(url, data=None, session=None, proxies=None, want_code=False):
+    """
+    发起http请求，返回源码。失败则返回空串''
+    :param url: url
+    :param data: post的data
+    :param session: 使用该session 对象发起请求
+    :param proxies: 代理
+    :param want_code: 是否返回状态码，默认为False。True则返回 (source,status_code)
+    :return: source if not want_code else (source,status_code)
+    """
     try:
         headers['User-Agent'] = random.choice(user_agents)
-        if data is None:
-            res = requests.get(url, headers=headers, proxies=proxies) if session is None \
-                else session.get(url, headers=headers, proxies=proxies)
-        else:
-            res = requests.post(url, headers=headers, data=data, proxies=proxies) if session is None \
-                else session.post(url, headers=headers, data=data, proxies=proxies)
+        with gevent.Timeout(seconds=10, exception=Exception('[Connection Timeout]')):
+            if data is None:
+                res = requests.get(url, headers=headers, proxies=proxies) if session is None \
+                    else session.get(url, headers=headers, proxies=proxies)
+            else:
+                res = requests.post(url, headers=headers, data=data, proxies=proxies) if session is None \
+                    else session.post(url, headers=headers, data=data, proxies=proxies)
 
         code = res.status_code
         log('[{:d}] {:s} {:s}'.format(code, 'POST' if data is not None else 'GET', url))
-        return res.text if code == 200 else ''
+
+        if want_code:
+            return (res.text, code) if code == 200 else ('', code)
+        else:
+            return res.text if code == 200 else ''
     except Exception as e:
         # log(e.args)
         # log('[{:s}] {:s} {:s}'.format('HTTP Error', 'POST' if data is not None else 'GET', url))
@@ -139,7 +167,7 @@ def from_pachong_org():
             ]
     for url in urls:
         sleep(0.5)
-        res = http(url)
+        res = safe_http(url)
 
         # var duck=1159+2359
         m = re.search('var ([a-zA-Z]+)=(.*?);', res)
@@ -190,7 +218,7 @@ def from_cn_proxy():
 
     for url in urls:
         sleep(0.5)
-        res = http(url)
+        res = safe_http(url)
         data = re.findall('<td>(\d+\.\d+\.\d+\.\d+)</td>.*?<td>(\d+)</td>', res, re.DOTALL)
 
         for item in data:
@@ -204,7 +232,7 @@ def from_proxy_spy():
     :return:
     """
     url = 'http://txt.proxyspy.net/proxy.txt'
-    res = http(url)
+    res = safe_http(url)
     proxies = re.findall('(\d+\.\d+\.\d+\.\d+:\d+) .*', res)
     return proxies
 
@@ -228,7 +256,7 @@ def from_xici_daili():
     proxies = []
     for url in urls:
         sleep(4)
-        res = http(url)
+        res = safe_http(url)
         data = re.findall('<td>(\d+\.\d+\.\d+\.\d+)</td>.*?<td>(\d+)</td>', res, re.DOTALL)
         proxies += ['{:s}:{:s}'.format(host, port) for (host, port) in data]
     return proxies
@@ -240,7 +268,7 @@ def from_hide_my_ip():
     :return:
     """
     url = 'https://www.hide-my-ip.com/proxylist.shtml'
-    res = http(url)
+    res = safe_http(url)
 
     data = re.findall('"i":"(\d+\.\d+\.\d+\.\d+)","p":"(\d+)"', res)
     proxies = ['{:s}:{:s}'.format(host, port) for (host, port) in data]
@@ -260,7 +288,7 @@ def from_cyber_syndrome():
     proxies = []
     for url in urls:
         sleep(0.5)
-        res = http(url)
+        res = safe_http(url)
         proxies += re.findall('(\d+\.\d+\.\d+\.\d+:\d+)', res)
     return proxies
 
@@ -278,7 +306,7 @@ def from_free_proxy_list():
 
     for url in urls:
         sleep(0.5)
-        res = http(url)
+        res = safe_http(url)
         data = re.findall('<tr><td>(\d+\.\d+\.\d+\.\d+)</td><td>(\d+)</td>', res)
         proxies += ['{:s}:{:s}'.format(host, port) for (host, port) in data]
     return proxies
@@ -315,7 +343,7 @@ def from_gather_proxy():
     }
 
     # get captcha
-    res = http(url_login, session=session)
+    res = safe_http(url_login, session=session)
     m = re.search('Enter verify code: <span class="blue">(.*?) = </span>', res)
     if not m:
         return []
@@ -341,8 +369,8 @@ def from_gather_proxy():
     }
 
     # post to login and redirect to info page to get download `id`
-    http(url_login, data=data, session=session)
-    res = http(url_info, session=session)
+    safe_http(url_login, data=data, session=session)
+    res = safe_http(url_info, session=session)
 
     m = re.search('<p><a href="/proxylist/downloadproxylist/\?sid=(\d+)">Download', res)
     if m is None:
@@ -357,7 +385,7 @@ def from_gather_proxy():
     }
 
     # post id to get proxy list
-    res = http(url_download.format(m.group(1)), data=data, session=session)
+    res = safe_http(url_download.format(m.group(1)), data=data, session=session)
     session.close()
 
     proxies = res.split('\n')  # split the txt file
@@ -384,7 +412,7 @@ def from_get_proxy():
     retry = 0
     length = len(urls)
     while i < length:
-        res = http(urls[i])
+        res = safe_http(urls[i])
         try:
             soup = BeautifulSoup(res, 'lxml')
         except:
@@ -405,48 +433,7 @@ def from_get_proxy():
     return proxies
 
 
-def test_proxies(proxies, timeout, single_url=None, many_urls=None):
-    """
-    测试代理。剔除响应时间大于timeout的代理
-    :param proxies:  代理列表
-    :param url:  测试链接
-    :param timeout: 响应时间(s)
-    :return:
-    """
-
-    proxies = set(proxies)
-    errors = set()
-    pool = Pool(100)
-
-    def test(proxy):
-        failed = False
-        code = 403
-        url = random.choice(many_urls) if many_urls is not None else single_url
-
-        try:
-            with gevent.Timeout(seconds=timeout, exception=Exception('[Connection Timeout]')):
-                res = requests.get(url, proxies={'http': 'http://{}'.format(proxy.strip()),
-                                                 'https': 'https://{}'.format(proxy.strip())})
-                code = res.status_code
-            log('[Proxy: {:d} {:s}]'.format(code, proxy))
-        except Exception as e:
-            # log(e.args)
-            failed = True
-            errors.add(proxy)
-
-        store_in_db(proxy, status_code=code, is_failed=failed)
-
-    for proxy in proxies:
-        pool.spawn(test, proxy)
-    pool.join()
-
-    proxies = proxies - errors
-    log('[HTTP Proxies] Available:{:d} Deprecated:{:d}'.format(len(proxies), len(errors)))
-
-    return list(proxies)
-
-
-def update():
+def get_proxies():
     """
     从上面的网站爬取最新的代理ip
     """
@@ -465,22 +452,67 @@ def update():
         pro = func()
         log('[{:s}] {:d} proxies'.format(func.__name__, len(pro)))
         proxies += pro
-
-    proxies = test_proxies(proxies, 10, single_url='https://www.baidu.com')
-    log('Proxies amount: {:d}'.format(len(proxies)))
+    return proxies
 
 
-def check():
+def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=None):
     """
-    测试以及爬取的ip的可用性
+    测试代理。剔除响应时间大于timeout的代理
+
+    或者在测试的同时进行数据处理 call_back(url,source,*args,**kwargs)
+    :param proxies:  代理列表
+    :param timeout: 响应时间(s)
+    :param single_url: 用作测试的url
+    :param many_urls: 用作测试的url列表，测试时从中随机选取一个
+    :param call_back: 处理测试url对应网页的源码
+    :param kwargs: call_back(url,source,*args,**kwargs)
+    :param args: call_back(url,source,*args,**kwargs)
+    :return:
     """
-    proxies = [proxy.proxy for proxy in Proxy.select()]
-    urls = ['https://www.avmoo.com/cn/movie/{}'.format(int2mid(i)) for i in range(1, 252604)]
-    test_proxies(proxies, 10, many_urls=urls)
+
+    proxies = set(proxies)
+    errors = set()
+    pool = Pool(100)
+
+    def test(proxy):
+        code = None
+        url = random.choice(many_urls) if many_urls is not None else single_url
+
+        try:
+            with gevent.Timeout(seconds=timeout, exception=Exception('[Connection Timeout]')):
+                res = requests.get(url, proxies={'http': 'http://{}'.format(proxy.strip()),
+                                                 'https': 'https://{}'.format(proxy.strip())})
+                code = res.status_code
+                source = res.text
+
+            log('[Proxy: {:d} {:s}]'.format(code, proxy))
+
+            # 回调
+            if source is not None and call_back is not None and code == 200:
+                call_back(url, source)
+
+            if code != 200:
+                errors.add(proxy)
+
+        except Exception as e:
+            # log(e.args)
+            errors.add(proxy)
+
+        store_in_db(proxy, status_code=code)
+
+    for proxy in proxies:
+        pool.spawn(test, proxy)
+    pool.join()
+
+    proxies = proxies - errors
+    log('[HTTP Proxies] Available:{:d} Deprecated:{:d}'.format(len(proxies), len(errors)))
+
+    return list(proxies)
 
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         using_logger = True
-    update()
-    # check()
+
+    proxies = test_proxies(get_proxies(), 10, single_url='https://www.avmoo.com/cn/')
+    log('Proxies amount: {:d}'.format(len(proxies)))
