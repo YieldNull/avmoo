@@ -39,11 +39,6 @@ headers = {
                   'Ubuntu Chromium/48.0.2564.116 Chrome/48.0.2564.116 Safari/537.36',
     'Accept-Encoding': 'gzip, deflate, sdch',
     'Accept-Language': 'en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,zh-TW;q=0.2',
-    'Cookie': '__cfduid=dc8923d6d41cddd5038668885a97b61a11458400017; '
-              'AD_enterTime=1458400024; AD_juic_j_L_728x90=0; AD_wav_j_L_728x90=0; AD_exoc_j_POPUNDER=1;'
-              ' AD_clic_j_POPUNDER=2; AD_adst_j_POPUNDER=1; AD_traf_j_POPUNDER=1; AD_exoc_j_L_728x90=4; '
-              'AD_exoc_j_M_728x90=4; AD_javu_j_L_728x90=2; AD_juic_j_M_728x90=1; '
-              'AD_bts_j_P_728x90=5; _gat=1; _ga=GA1.2.2125902479.1458400018'
 }
 
 user_agents = [
