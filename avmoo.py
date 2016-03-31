@@ -7,9 +7,7 @@
 # 第一导入，因为proxy中使用了monkey_patch()
 from proxy import get_proxies, test_proxies, log, Proxy, safe_http, enable_logger
 
-from gevent import sleep
 from gevent.pool import Pool
-import gevent
 import re
 import pymongo
 import random
@@ -19,6 +17,9 @@ from pymongo import MongoClient
 
 client = MongoClient()
 db = client.avmoo
+
+max_mid = '1'
+home_url = 'https://www.avmoo.com/cn'
 
 
 def mid2int(mid):
@@ -53,6 +54,20 @@ def int2mid(value):
         return '%s%s' % (int2mid(sub), c)
 
 
+def check_redirect(res):
+    """
+    查看是否有重定向，有则将home_url改为重定向后的url
+    :param history:
+    """
+    global home_url
+    if len(res.history) > 0:
+        real_url = res.url
+        m = re.search('(https://.*?/cn)/.*', real_url)
+        print(real_url)
+        if m is not None:
+            home_url = m.group(1)
+
+
 def safe_search(ptn, src, pair=False, integer=False):
     """
     search ptn in src, and return group search result
@@ -79,16 +94,22 @@ def safe_search(ptn, src, pair=False, integer=False):
             return ''
 
 
-def get_movie(url, source):
+def get_movie(url, source, code=None):
     """
     获取指定影片的全部信息
     参见 "https://www.avmoo.com/cn/movie/500"
 
     :param url: 网页url
     :param source: 网页源码
-    :return:
+    :param code: 状态码。
+    :return: code=200 则返回影片信息，code=404则返回{'mid':mid},其它情况返回None
     """
     mid = re.search('.*?/movie/(.*)', url).group(1)
+
+    if code == 404:
+        return {'mid': mid}
+    elif code != 200:
+        return None
 
     server = re.search('(.*?)/movie/.*', url).group(1)
     ptn_server = server.replace('.', '\.')
@@ -169,20 +190,22 @@ def get_movie(url, source):
     return document
 
 
-def store_movie(url, source):
+def store_movie(url, source, code=None):
     """
     将电影信息存入mongodb
     :param url: 电影url
     :param source: 对应的源码
+    :param code: http状态码
     """
-    document = get_movie(url, source)
+
+    document = get_movie(url, source, code)
 
     if document is not None:
         try:
             result = db.movie.insert_one(document)
             log('[Mongodb] store document {:s}'.format(str(result.inserted_id)))
         except pymongo.errors.DuplicateKeyError:
-            pass
+            log('[Mongodb] Already exists')
 
 
 def get_missing():
@@ -194,7 +217,7 @@ def get_missing():
     proxies = [mid2int(document['mid']) for document in cursor]
     cursor.close()
 
-    available = set(range(1, mid2int('5flj')))
+    available = set(range(1, mid2int(max_mid) + 1))
     instore = set(proxies)
 
     return list(available - instore)
@@ -205,8 +228,8 @@ def fetch_when_test():
     测试代理ip的同时进行爬取目标页面信息
     """
     missing = get_missing()
+    urls = ['{:s}/movie/{:s}'.format(home_url, int2mid(i)) for i in missing]
     ps = get_proxies()
-    urls = ['https://www.avmoo.com/cn/movie/{:s}'.format(int2mid(i)) for i in missing]
     test_proxies(ps, 10, many_urls=urls, call_back=store_movie)
 
 
@@ -214,33 +237,47 @@ def fetch_continually():
     """
     使用已有的代理ip来爬
     """
+    query = Proxy.select().where(~(Proxy.status_code >> None))
+    proxies = set([proxy.proxy for proxy in query])
+    bad_proxies = set()
 
     def job(url, proxy):
-        try:
-            with gevent.Timeout(seconds=10, exception=Exception('[Connection Timeout]')):
-                source = safe_http(url,
-                                   proxies={'https': 'https://{}'.format(proxy), 'http': 'http://{}'.format(proxy)})
-                store_movie(url, source)
-        except:
-            pass
+        res = safe_http(url,
+                        proxies={
+                            'https': 'https://{}'.format(proxy),
+                            'http': 'http://{}'.format(proxy)
+                        }, want_obj=True)
+        if res is not None:
+            check_redirect(res)
+            store_movie(url, res.text, res.status_code)
+        else:
+            bad_proxies.add(proxy)
 
-    query = Proxy.select().where(~(Proxy.status_code >> None))
     missing = get_missing()
 
     pool = Pool(100)
-    while True:
-        for proxy in query:
+    while len(missing) > 0:
+        for proxy in proxies:
+            if len(missing) == 0:
+                break
+
             index = random.randint(0, len(missing) - 1)
             int_mid = missing[index]
-            missing.pop(index)
+            missing.pop(index)  # 从待爬取列表移除
 
-            url = 'https://www.avmoo.com/cn/movie/{:s}'.format(int2mid(int_mid))
-            pool.spawn(job, url, proxy.proxy)
+            url = '{:s}/movie/{:s}'.format(home_url, int2mid(int_mid))
+            pool.spawn(job, url, proxy)
         pool.join()
-        sleep(0.5)
 
-        if len(missing) < 2000:
-            break
+        # 清除不可用的proxy
+        proxies -= bad_proxies
+        log('[Proxy] Clear {:d} bad proxies. Available {:d}'.format(len(bad_proxies), len(proxies)))
+        bad_proxies.clear()
+
+        # 待爬列表空了之后，再查一遍没有存到数据库中的影片
+        # 因为之前会遇到403或timeout等错误
+        if len(missing) == 0:
+            missing = get_missing()
 
 
 if __name__ == '__main__':
@@ -249,5 +286,10 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         enable_logger()
 
+    max_mid = '5flj'
+    home_url = 'https://avmo.pw/cn'
+
     # fetch_when_test()
+
     fetch_continually()
+    log('job done')

@@ -116,19 +116,20 @@ def log(msg):
         print(msg)
 
 
-def safe_http(url, data=None, session=None, proxies=None, want_code=False):
+def safe_http(url, data=None, session=None, proxies=None, timeout=10, want_obj=False):
     """
-    发起http请求，返回源码。失败则返回空串''
+    发起http请求，返回源码。失败则返回空串''。
     :param url: url
     :param data: post的data
     :param session: 使用该session 对象发起请求
-    :param proxies: 代理
-    :param want_code: 是否返回状态码，默认为False。True则返回 (source,status_code)
-    :return: source if not want_code else (source,status_code)
+    :param proxies: requests 代理
+    :param timeout: 默认设置10超时。
+    :param want_obj: 是否返回response object，默认为False。True则返回 response_obj,而不是源码
+    :return: 源码或response obj。超时或其它异常则返回空串''，或None(want_obj=True)
     """
     try:
         headers['User-Agent'] = random.choice(user_agents)
-        with gevent.Timeout(seconds=10, exception=Exception('[Connection Timeout]')):
+        with gevent.Timeout(seconds=timeout, exception=Exception('[Connection Timeout]')):
             if data is None:
                 res = requests.get(url, headers=headers, proxies=proxies) if session is None \
                     else session.get(url, headers=headers, proxies=proxies)
@@ -139,14 +140,14 @@ def safe_http(url, data=None, session=None, proxies=None, want_code=False):
         code = res.status_code
         log('[{:d}] {:s} {:s}'.format(code, 'POST' if data is not None else 'GET', url))
 
-        if want_code:
-            return (res.text, code) if code == 200 else ('', code)
+        if want_obj:
+            return res
         else:
             return res.text if code == 200 else ''
     except Exception as e:
         # log(e.args)
         # log('[{:s}] {:s} {:s}'.format('HTTP Error', 'POST' if data is not None else 'GET', url))
-        return ''
+        return None if want_obj else ''
 
 
 def from_pachong_org():
@@ -454,7 +455,7 @@ def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=No
     """
     测试代理。剔除响应时间大于timeout的代理
 
-    或者在测试的同时进行数据处理 call_back(url,source,*args,**kwargs)
+    或者在测试的同时进行数据处理 200则调用 call_back(url,source)
     :param proxies:  代理列表
     :param timeout: 响应时间(s)
     :param single_url: 用作测试的url
