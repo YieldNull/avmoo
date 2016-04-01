@@ -2,10 +2,14 @@
 
 """
 利用爬取的代理IP，爬取avmoo.com的影片信息。存入mongodb。
+
+Cron:
+
+0 1 * * * /path/to/avmoo.py -l --site https://avmo.pw --col avmoo
 """
 
 # 第一导入，因为proxy中使用了monkey_patch()
-from proxy import get_proxies, test_proxies, log, Proxy, safe_http, enable_logger
+from proxy import fetch_proxies, test_proxies, log, Proxy, safe_http, enable_logger
 
 from gevent.pool import Pool
 import re
@@ -17,6 +21,7 @@ from pymongo import MongoClient
 
 client = MongoClient()
 db = client.avmoo
+collection = None
 
 max_mid = '1'
 home_url = 'https://www.avmoo.com/cn'
@@ -94,7 +99,7 @@ def safe_search(ptn, src, pair=False, integer=False):
             return ''
 
 
-def get_movie(url, source, code=None):
+def get_movie(url, source, code=200):
     """
     获取指定影片的全部信息
     参见 "https://www.avmoo.com/cn/movie/500"
@@ -190,6 +195,19 @@ def get_movie(url, source, code=None):
     return document
 
 
+def get_latest():
+    """
+    分页获取最新的作品链接
+    :param page:
+    :return:
+    """
+    ptn_movie_href = '<a class="movie-box.*?" href=".*?/cn/movie/(.*?)">'
+    source = safe_http(home_url)
+
+    m = re.search(ptn_movie_href, source)
+    return m.group(1) if m is not None else None
+
+
 def store_movie(url, source, code=None):
     """
     将电影信息存入mongodb
@@ -202,43 +220,54 @@ def store_movie(url, source, code=None):
 
     if document is not None:
         try:
-            result = db.movie.insert_one(document)
+            result = collection.insert_one(document)
             log('[Mongodb] store document {:s}'.format(str(result.inserted_id)))
         except pymongo.errors.DuplicateKeyError:
             log('[Mongodb] Already exists')
 
 
-def get_missing():
+def query_proxies():
+    """
+    查询已存可使用的proxies
+    :return: set
+    """
+    query = Proxy.select().where(~(Proxy.status_code >> None))
+    return set([proxy.proxy for proxy in query])
+
+
+def query_missing():
     """
     get还没有爬的movie列表
     :return: mid的10进制形式
     """
-    cursor = db.movie.find(filter=None, projection={'mid': True, '_id': False})
-    proxies = [mid2int(document['mid']) for document in cursor]
+    cursor = collection.find(filter=None, projection={'mid': True, '_id': False})
+    movies = [mid2int(document['mid']) for document in cursor]
     cursor.close()
 
     available = set(range(1, mid2int(max_mid) + 1))
-    instore = set(proxies)
+    instore = set(movies)
 
-    return list(available - instore)
+    missing = list(available - instore)
+    log('[Missing] {:d} items'.format(len(missing)))
+
+    return missing
 
 
 def fetch_when_test():
     """
     测试代理ip的同时进行爬取目标页面信息
     """
-    missing = get_missing()
+    missing = query_missing()
     urls = ['{:s}/movie/{:s}'.format(home_url, int2mid(i)) for i in missing]
-    ps = get_proxies()
-    test_proxies(ps, 10, many_urls=urls, call_back=store_movie)
+    ps = fetch_proxies()
+    test_proxies(ps, many_urls=urls, call_back=store_movie)
 
 
-def fetch_continually():
+def fetch_using_store():
     """
     使用已有的代理ip来爬
     """
-    query = Proxy.select().where(~(Proxy.status_code >> None))
-    proxies = set([proxy.proxy for proxy in query])
+    proxies = query_proxies()
     bad_proxies = set()
 
     def job(url, proxy):
@@ -246,14 +275,14 @@ def fetch_continually():
                         proxies={
                             'https': 'https://{}'.format(proxy),
                             'http': 'http://{}'.format(proxy)
-                        }, want_obj=True)
+                        }, want_obj=True, timeout=15)
         if res is not None:
             check_redirect(res)
             store_movie(url, res.text, res.status_code)
         else:
             bad_proxies.add(proxy)
 
-    missing = get_missing()
+    missing = query_missing()
 
     pool = Pool(100)
     while len(missing) > 0:
@@ -273,23 +302,56 @@ def fetch_continually():
         proxies -= bad_proxies
         log('[Proxy] Clear {:d} bad proxies. Available {:d}'.format(len(bad_proxies), len(proxies)))
         bad_proxies.clear()
+        if len(proxies) < 80:
+            proxies = query_proxies()  # 重查
 
         # 待爬列表空了之后，再查一遍没有存到数据库中的影片
         # 因为之前会遇到403或timeout等错误
         if len(missing) == 0:
-            missing = get_missing()
+            missing = query_missing()
 
 
 if __name__ == '__main__':
-    import sys
+    import argparse
 
-    if len(sys.argv) > 1:
+    parser = argparse.ArgumentParser(description='A spider for three specific porn sites')
+
+    parser.add_argument('-l', dest='logging', action='store_true',
+                        help='Use logger or print to stdout. Missing is to stdout')
+
+    parser.add_argument('-t', dest='test', action='store_true',
+                        help='Get new proxies and test them'
+                             'and fetch missing movies in the meantime.'
+                             'Default is using proxies in database')
+
+    parser.add_argument('--mid', dest='mid', action='store', type=str,
+                        help='The max mid among the movies on the site. Like "5f20"')
+
+    parser.add_argument('--site', dest='site', action='store', required=True, type=str,
+                        help='Home URL of the site. Like "https://avmo.pw')
+
+    parser.add_argument('--col', dest='collection', action='store', required=True,
+                        choices=["avmoo", "avsox", "avmemo"],
+                        help='Mongodb collection name.')
+
+    args = parser.parse_args()
+
+    if args.logging:
         enable_logger()
 
-    max_mid = '5flj'
-    home_url = 'https://avmo.pw/cn'
+    max_mid = args.mid if args.mid else get_latest()
+    home_url = args.site + '/cn'
 
-    # fetch_when_test()
+    if args.collection == 'avmoo':
+        collection = db.avmoo
+    elif args.collection == 'avmemo':
+        collection = db.avmemo
+    else:
+        collection = db.avsox
 
-    fetch_continually()
+    if args.test:
+        fetch_when_test()
+    else:
+        fetch_using_store()
+
     log('job done')

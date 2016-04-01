@@ -4,7 +4,7 @@
 Get proxies from some free proxy sites.
 
 Cron:
-    0 * * * * /home/ubuntu/proxy.py -l
+    0 */3 * * * /path/to/proxy.py -l --url https://movie.douban.com
 
 """
 import gevent
@@ -54,10 +54,16 @@ user_agents = [
     'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:45.0) Gecko/20100101 Firefox/45.0'
 ]
 
-# # logging config
+# logging config
 logging.getLogger("requests").setLevel(logging.WARNING)
 
-log_file = os.path.join(os.path.join(os.path.expanduser("~"), 'proxy'), 'proxy.log')
+# logging file "~/proxy/proxy.log"
+log_dir = os.path.join(os.path.expanduser("~"), 'proxy')
+if not os.path.exists(log_dir):
+    os.mkdir(log_dir)
+log_file = os.path.join(log_dir, 'proxy.log')
+
+# logger config
 handler = RotatingFileHandler(log_file, mode='a', maxBytes=50 * 1024 * 1024, backupCount=2)
 handler.setFormatter(logging.Formatter('[%(asctime)s] %(message)s'))
 handler.setLevel(logging.INFO)
@@ -399,8 +405,8 @@ def from_get_proxy():
 
     urls = [base.format('CN', i) for i in range(1, 25)]
     urls += [base.format('US', i) for i in range(1, 25)]
-    urls += [base.format('CN', i) for i in range(25, 100)]
-    urls += [base.format('US', i) for i in range(25, 100)]
+    urls += [base.format('CN', i) for i in range(25, 50)]
+    urls += [base.format('US', i) for i in range(25, 50)]
 
     proxies = []
 
@@ -429,7 +435,7 @@ def from_get_proxy():
     return proxies
 
 
-def get_proxies():
+def fetch_proxies():
     """
     从上面的网站爬取最新的代理ip
     """
@@ -451,11 +457,12 @@ def get_proxies():
     return proxies
 
 
-def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=None):
+def test_proxies(proxies, timeout=10, single_url=None, many_urls=None, call_back=None):
     """
     测试代理。剔除响应时间大于timeout的代理
 
     或者在测试的同时进行数据处理 200则调用 call_back(url,source)
+    :type proxies: list
     :param proxies:  代理列表
     :param timeout: 响应时间(s)
     :param single_url: 用作测试的url
@@ -475,10 +482,6 @@ def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=No
         try:
             with gevent.Timeout(seconds=timeout, exception=Exception('[Connection Timeout]')):
                 headers['User-Agent'] = random.choice(user_agents)
-                headers['Cookie'] = '__test; AD_enterTime=1459339124; AD_wav_j_M_728x90=0; AD_exoc_j_M_728x90=1; ' \
-                                    'AD_exoc_j_POPUNDER=1; AD_javu_j_M_728x90=1; _gat=1; AD_juic_j_L_728x90=1; ' \
-                                    '__test; AD_juic_j_M_728x90=1; AD_bts_j_P_728x90=3; AD_clic_j_POPUNDER=3; ' \
-                                    '_ga=GA1.2.981862313.1458217151'
 
                 res = requests.get(url,
                                    proxies={'http': 'http://{}'.format(proxy.strip()),
@@ -501,7 +504,7 @@ def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=No
             # log(e.args)
             errors.add(proxy)
 
-        store_in_db(proxy, status_code=code)
+        store_in_db(proxy, status_code=code)  # 存
 
     for proxy in proxies:
         pool.spawn(test, proxy)
@@ -513,11 +516,34 @@ def test_proxies(proxies, timeout, single_url=None, many_urls=None, call_back=No
     return list(proxies)
 
 
-if __name__ == '__main__':
-    import sys
+def test_store(url):
+    query = Proxy.select().where(~(Proxy.status_code >> None))
+    proxies = [proxy.proxy for proxy in query]
+    return test_proxies(proxies, single_url=url)
 
-    if len(sys.argv) > 1:
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='A spider for some free proxy sites')
+
+    parser.add_argument('-l', dest='logging', action='store_true',
+                        help='Use logger or print to stdout. Missing is to stdout')
+
+    parser.add_argument('-t', dest='test', action='store_true',
+                        help='Test proxies in database')
+
+    parser.add_argument('--url', dest='url', action='store', required=True, type=str,
+                        help='Url for testing proxies. Like "https://avmo.pw/cn"')
+
+    args = parser.parse_args()
+
+    if args.logging:
         using_logger = True
 
-    proxies = test_proxies(get_proxies(), 10, single_url='https://www.avmoo.com/cn/')
+    if args.test:
+        proxies = test_store(args.url)
+    else:
+        proxies = test_proxies(fetch_proxies(), single_url=args.url)
+
     log('Proxies amount: {:d}'.format(len(proxies)))
